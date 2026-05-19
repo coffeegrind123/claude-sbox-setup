@@ -151,12 +151,13 @@ $expectedPatches = @{
     'engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs' = 'AddFromFileBuiltIn( "addons/claude-sbox/.sbproj" )'
     'engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs' = 'project.Config.Type == "tool"'
     'engine/Sandbox.Tools/StartupLoadProject.cs' = '.sbox-global'
-    # Utility.Projects.Compile.cs is touched by BOTH patch 0003 and patch 0005 (different
-    # blocks). The marker above covers patch 0003's GlobalToolsNamespace conditional; patch
-    # 0005's "skip editor IgnoreFolders for tool" block isn't independently verified here
-    # because Hashtable can't key two entries by the same file path. Acceptable -- the two
-    # blocks are adjacent in the file, so an upstream conflict that strips only patch 0005
-    # but leaves patch 0003 intact is very unlikely.
+    'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs' = 'Package.TypeName == "tool"'
+    # Utility.Projects.Compile.cs is touched by patches 0003 + 0005 + 0006 + 0007 + 0008
+    # (different blocks). The marker above covers patch 0003's GlobalToolsNamespace
+    # conditional; patches 0005-0008's individual blocks aren't independently verified
+    # here because Hashtable can't key multiple entries by the same file path.
+    # Acceptable -- the blocks are clustered close together in the file, so an upstream
+    # conflict that strips only some of them but leaves patch 0003 intact is unlikely.
 }
 
 # Map: tracked engine file → patches/<file>.patch. The .gitignore is NOT here

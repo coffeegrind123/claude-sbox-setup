@@ -1,0 +1,32 @@
+diff --git a/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs b/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs
+index 8edd23a8..170af50a 100644
+--- a/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs
++++ b/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs
+@@ -228,6 +228,27 @@ internal static partial class PackageManager
+ 			group.AccessControl = AccessControl;
+ 			group.ReferenceProvider = this;
+ 
++			// claude-sbox -- local engine modification. Skip the API whitelist for
++			// tool-type cloud packages on mount-time compile. Mirrors what
++			// Project.Compiling.cs:56 already does for source-clone-loaded tool
++			// addons (sets compilerSettings.Whitelist = false for Config.Type ==
++			// "tool"). The cloud-mount path here uses pre-compiled archives whose
++			// _config.Whitelist was baked in at publish time, so the only way to
++			// disable the check at mount time is to null Group.AccessControl --
++			// Compiler.Build.cs:241 short-circuits when either side of the
++			// `_config.Whitelist && Group.AccessControl is { } access` test is
++			// false. Without this, sbox.game-installed tool addons fail at mount
++			// time with hundreds of "is not allowed when whitelist is enabled"
++			// errors, while the SAME source loaded as a built-in (via
++			// AddFromFileBuiltIn) compiles cleanly thanks to Project.Compiling.cs.
++			//
++			// Scoped to tool packages only; game/library cloud packages still
++			// get the sandbox whitelist enforcement they're designed for.
++			if ( Package.TypeName == "tool" )
++			{
++				group.AccessControl = null;
++			}
++
+ 			using ( analytic.ScopeTimer( "LoadArchives" ) )
+ 			{
+ 				foreach ( var file in codeArchives )

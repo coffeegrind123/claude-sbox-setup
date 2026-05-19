@@ -4,7 +4,7 @@
     Apply claude-sbox's engine patches to a sbox-public checkout.
 
 .DESCRIPTION
-    claude-sbox depends on eight small engine modifications to behave
+    claude-sbox depends on nine small engine modifications to behave
     correctly:
 
       1. engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs
@@ -82,7 +82,21 @@
          enforcing it. Without this patch tool publishes fail with ~700
          "is not allowed when whitelist is enabled" errors. Maintainers-only.
 
-    This script applies all eight patches to the parent sbox-public checkout.
+      9. engine/Sandbox.Engine/Services/Packages/PackageManager/
+         PackageManager.ActivePackage.cs. The CLOUD-MOUNT counterpart to
+         patch 8. When a user installs ghage.claude-sbox from sbox.game,
+         the addon is mounted by ActivePackage.CompileCodeArchive, which
+         sets group.AccessControl = AccessControl on its own CompileGroup
+         and triggers the same whitelist check at mount time -- so users
+         who DON'T have the addon source-cloned at game/addons/claude-sbox/
+         can't load the addon either. Project.Compiling.cs:56 already sets
+         Whitelist=false for tool projects loaded via the source path; this
+         patch mirrors that by nulling AccessControl for tool-type packages
+         in the cloud-mount path. Patch 8 fixes the publishing side, patch
+         9 fixes the consuming side -- both needed for end-to-end cloud
+         distribution of a tool addon.
+
+    This script applies all nine patches to the parent sbox-public checkout.
     It is idempotent: re-running on a checkout where the patches are already
     applied is a no-op.
 
