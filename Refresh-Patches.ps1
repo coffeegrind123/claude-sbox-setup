@@ -79,6 +79,7 @@ $patchedFiles = [ordered]@{
     'engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs'         = '0002-sboxbuild-dedupe-manifest-paths.patch'
     'engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs'        = '0003-publish-compile-tool-type-projects.patch'
     'engine/Sandbox.Tools/StartupLoadProject.cs'                      = '0004-startuploadproject-claude-sbox-global-install.patch'
+    'engine/Sandbox.Tools/Utility/ProjectPublisher/ProjectPublisher.cs' = '0005-publisher-honor-includesourcefiles.patch'
 }
 
 if (-not (Test-Path .\Bootstrap.bat)) {

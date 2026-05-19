@@ -85,12 +85,13 @@ Copy-Item -Recurse skill "$HOME/.claude/skills/sbox-live"
 
 ### Engine patches: what gets applied
 
-Setup applies four patches to your sbox-public tree (all reversible, all shipped in `patches/` for inspection):
+Setup applies five patches to your sbox-public tree (all reversible, all shipped in `patches/` for inspection):
 
 1. **`Project.Static.cs`**: adds the addon to the engine's built-in addon list **if** a source clone is present at `game/addons/claude-sbox/`. Source-clone branch only; the sbox.game-install flow (the common case) gets auto-load from patch 4 instead.
 2. **`DownloadPublicArtifacts.cs`**: dedupes manifest entries by destination path. Fixes an upstream race where parallel artifact downloads fight over the same file when a manifest contains duplicate-path entries (causes confusing "being used by another process" failures during `Bootstrap.bat`).
 3. **`Utility.Projects.Compile.cs`**: enables publish-compile support for tool-type projects so the addon can be packaged through the editor's publish pipeline.
 4. **`StartupLoadProject.cs`**: auto-mounts `ghage.claude-sbox` on every project load from a global cache at `<sbox-public>/game/.sbox-global/cloud/.bin/`, so one-time `package_install ghage.claude-sbox tools` makes the addon available for every project, every editor restart, with no redownload (size-matched pre-stage skips the `.cll` download). Also adds `ghage.claude-sbox` to the `required` set inside `RefreshCloudAssets` so cross-project eviction can't wipe the addon's per-project cache. Scoped to `ghage.claude-sbox` only; all other cloud packages keep the engine's default per-project cache behaviour.
+5. **`ProjectPublisher.cs`**: restores honouring of the `.sbproj` `IncludeSourceFiles` setting at publish time. Facepunch hardcoded it to `false` ("Disabled this until we implement it in a better way"), which broke cloud distribution of tool-type addons — the published `.cll` shipped with no source files, so the engine mounted an empty package and `[Event]` handlers never registered. With this patch, the addon's `IncludeSourceFiles: true` setting actually takes effect, the publisher bundles the full source tree, `PackageLoader` compiles it on mount, the addon boots. Maintainers-only — matters if you're republishing the addon, not if you're just installing it.
 
 ### Updating sbox-public
 
@@ -101,7 +102,7 @@ cd game\addons\claude-sbox-setup
 .\Safe-Pull.bat
 ```
 
-That snapshots your tracked-file edits and addon source (if you have one) to `.backups/<timestamp>/`, runs `git pull` on sbox-public, then re-applies the four engine patches in one pass and verifies their post-pull markers. If you'd rather do it by hand:
+That snapshots your tracked-file edits and addon source (if you have one) to `.backups/<timestamp>/`, runs `git pull` on sbox-public, then re-applies the five engine patches in one pass and verifies their post-pull markers. If you'd rather do it by hand:
 
 ```powershell
 cd <sbox-public>

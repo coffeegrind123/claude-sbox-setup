@@ -4,7 +4,7 @@
     Apply claude-sbox's engine patches to a sbox-public checkout.
 
 .DESCRIPTION
-    claude-sbox depends on four small engine modifications to behave
+    claude-sbox depends on five small engine modifications to behave
     correctly:
 
       1. engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs
@@ -30,7 +30,20 @@
          RefreshCloudAssets cross-project eviction. Scoped to claude-sbox
          only; other cloud packages keep default per-project cache behaviour.
 
-    This script applies all four patches to the parent sbox-public checkout.
+      5. engine/Sandbox.Tools/Utility/ProjectPublisher/ProjectPublisher.cs
+         Restores honouring of the .sbproj IncludeSourceFiles setting at
+         publish time. Facepunch hardcoded it to false (tony's "Disabled
+         this until we implement it in a better way" comment), which
+         broke cloud distribution of tool-type addons: the published .cll
+         shipped with no source files, so the engine mounted an empty
+         package with no [Event] handlers and no Boot. With this patch,
+         a tool addon's .sbproj setting "IncludeSourceFiles": true
+         actually takes effect, the publisher bundles the full source
+         tree, PackageLoader compiles it on mount, the addon boots.
+         Maintainers-only: only matters if you're republishing the addon
+         to sbox.game, not for installing it.
+
+    This script applies all five patches to the parent sbox-public checkout.
     It is idempotent: re-running on a checkout where the patches are already
     applied is a no-op.
 

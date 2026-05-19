@@ -151,6 +151,7 @@ $expectedPatches = @{
     'engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs' = 'AddFromFileBuiltIn( "addons/claude-sbox/.sbproj" )'
     'engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs' = 'project.Config.Type == "tool"'
     'engine/Sandbox.Tools/StartupLoadProject.cs' = '.sbox-global'
+    'engine/Sandbox.Tools/Utility/ProjectPublisher/ProjectPublisher.cs' = 'asset.Publishing.ProjectConfig.IncludeSourceFiles'
 }
 
 # Map: tracked engine file → patches/<file>.patch. The .gitignore is NOT here
