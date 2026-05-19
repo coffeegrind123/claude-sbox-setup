@@ -1,0 +1,28 @@
+diff --git a/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs b/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
+index 3c428cfb..435218c3 100644
+--- a/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
++++ b/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
+@@ -25,7 +25,22 @@ public static partial class EditorUtility
+ 			using CompileGroup compileGroup = new CompileGroup( "Publish" );
+ 			compileGroup.AccessControl = PackageManager.AccessControl;
+ 
+-			compilerSettings.IgnoreFolders.Add( "editor" );
++			// claude-sbox -- local engine modification. The unconditional
++			// "editor" ignore is correct for game/library addons (Code/Editor/
++			// holds editor-only inspectors/tool windows that should NOT ship to
++			// players), but actively wrong for tool-type addons: a tool addon is
++			// ENTIRELY editor code, by definition, and almost always organises
++			// its source under Code/Editor/<...> matching its
++			// "Editor.<Namespace>" root. Adding "editor" to IgnoreFolders for
++			// tool publishes silently strips the whole codebase, packs only
++			// Code/Imports.cs into the .cll, and produces an empty (~1KB)
++			// package that mounts with no [Event] handlers and no behaviour.
++			// Gate the strip on project type so game/library publish behaviour
++			// is unchanged.
++			if ( project.Config.Type != "tool" )
++			{
++				compilerSettings.IgnoreFolders.Add( "editor" );
++			}
+ 			compilerSettings.IgnoreFolders.Add( "unittest" );
+ 			compilerSettings.ReleaseMode = Compiler.ReleaseMode.Release;
+ 			compilerSettings.StripDisabledTextTrivia = true;

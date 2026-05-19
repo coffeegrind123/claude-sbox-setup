@@ -30,18 +30,22 @@
          RefreshCloudAssets cross-project eviction. Scoped to claude-sbox
          only; other cloud packages keep default per-project cache behaviour.
 
-      5. engine/Sandbox.Tools/Utility/ProjectPublisher/ProjectPublisher.cs
-         Restores honouring of the .sbproj IncludeSourceFiles setting at
-         publish time. Facepunch hardcoded it to false (tony's "Disabled
-         this until we implement it in a better way" comment), which
-         broke cloud distribution of tool-type addons: the published .cll
-         shipped with no source files, so the engine mounted an empty
-         package with no [Event] handlers and no Boot. With this patch,
-         a tool addon's .sbproj setting "IncludeSourceFiles": true
-         actually takes effect, the publisher bundles the full source
-         tree, PackageLoader compiles it on mount, the addon boots.
-         Maintainers-only: only matters if you're republishing the addon
-         to sbox.game, not for installing it.
+      5. engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
+         Skips the unconditional "editor" IgnoreFolders entry at
+         publish-compile time when the project type is "tool". Facepunch's
+         publish path adds "editor" to IgnoreFolders unconditionally,
+         which is correct for game/library addons (Code/Editor/ holds
+         editor-only inspectors and tool windows that shouldn't ship to
+         players) but actively wrong for tool-type addons -- a tool
+         addon is ENTIRELY editor code, almost always namespaced under
+         Editor.<X> with all source under Code/Editor/. Adding "editor"
+         to IgnoreFolders silently strips the whole codebase, packs only
+         Code/Imports.cs into the .cll, and produces an empty (~1KB)
+         package that mounts with no [Event] handlers. With this patch
+         tool publishes ship real code. Maintainers-only -- only matters
+         if you're republishing the addon to sbox.game, not for
+         installing it. Touches the same file as patch 3 but a different
+         block; both apply cleanly in sequence.
 
     This script applies all five patches to the parent sbox-public checkout.
     It is idempotent: re-running on a checkout where the patches are already
