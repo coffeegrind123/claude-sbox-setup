@@ -85,7 +85,7 @@ Copy-Item -Recurse skill "$HOME/.claude/skills/sbox-live"
 
 ### Engine patches: what gets applied
 
-Setup applies six patches to your sbox-public tree (all reversible, all shipped in `patches/` for inspection):
+Setup applies seven patches to your sbox-public tree (all reversible, all shipped in `patches/` for inspection):
 
 1. **`Project.Static.cs`**: adds the addon to the engine's built-in addon list **if** a source clone is present at `game/addons/claude-sbox/`. Source-clone branch only; the sbox.game-install flow (the common case) gets auto-load from patch 4 instead.
 2. **`DownloadPublicArtifacts.cs`**: dedupes manifest entries by destination path. Fixes an upstream race where parallel artifact downloads fight over the same file when a manifest contains duplicate-path entries (causes confusing "being used by another process" failures during `Bootstrap.bat`).
@@ -93,6 +93,7 @@ Setup applies six patches to your sbox-public tree (all reversible, all shipped 
 4. **`StartupLoadProject.cs`**: auto-mounts `ghage.claude-sbox` on every project load from a global cache at `<sbox-public>/game/.sbox-global/cloud/.bin/`, so one-time `package_install ghage.claude-sbox tools` makes the addon available for every project, every editor restart, with no redownload (size-matched pre-stage skips the `.cll` download). Also adds `ghage.claude-sbox` to the `required` set inside `RefreshCloudAssets` so cross-project eviction can't wipe the addon's per-project cache. Scoped to `ghage.claude-sbox` only; all other cloud packages keep the engine's default per-project cache behaviour.
 5. **`Utility.Projects.Compile.cs`** (second block — patch 3 hits the same file in a different spot): skips the unconditional `"editor"` `IgnoreFolders` entry at publish-compile time when the project type is `"tool"`. Facepunch's publish path strips the `editor` folder from compile input — correct for game/library addons (where `Code/Editor/` holds editor-only inspectors that shouldn't ship to players) but actively wrong for tool addons, which are ENTIRELY editor code and almost always namespaced under `Editor.<X>` with all source under `Code/Editor/`. Without this patch the publisher silently strips the whole codebase, packs only `Code/Imports.cs` into the `.cll`, and produces an empty (~1 KB) package that mounts with no `[Event]` handlers. Maintainers-only — only matters if you're republishing the addon, not for installing it.
 6. **`Utility.Projects.Compile.cs`** (third block in the same file, inside patch 3's `if Type == "tool"` branch): adds the explicit assembly references the in-editor compile already provides for tool projects — `Sandbox.Tools`, `Sandbox.Compiling`, Roslyn (`Microsoft.CodeAnalysis(.CSharp)`), `Facepunch.ActionGraphs`, `SkiaSharp`, plus net / process / registry / memory bits, and `AddToolBaseReference()` so `Editor.TreeView` / `AssetBrowser` / `ToastWidget` resolve. The publish-compile was missing all of these, so tool publishes failed with hundreds of "type or namespace not found" errors. `Project.Compiling.cs:109-122` is the in-editor mirror this restores. Maintainers-only.
+7. **`Utility.Projects.Compile.cs`** (fourth block, immediately after the CompileGroup is constructed): sets the publish CompileGroup's `ReferenceProvider` so cross-package references like `package.toolbase` (from patch 6's `AddToolBaseReference`) can resolve via `PackageManager.ActivePackages.Lookup`. In-editor compile groups get a provider from their owning `ActivePackage`; the publish CompileGroup is fresh and doesn't, so `AddToolBaseReference` throws `"Couldn't find reference package.toolbase"` without this. Maintainers-only.
 
 ### Updating sbox-public
 
@@ -103,7 +104,7 @@ cd game\addons\claude-sbox-setup
 .\Safe-Pull.bat
 ```
 
-That snapshots your tracked-file edits and addon source (if you have one) to `.backups/<timestamp>/`, runs `git pull` on sbox-public, then re-applies the six engine patches in one pass and verifies their post-pull markers. If you'd rather do it by hand:
+That snapshots your tracked-file edits and addon source (if you have one) to `.backups/<timestamp>/`, runs `git pull` on sbox-public, then re-applies the seven engine patches in one pass and verifies their post-pull markers. If you'd rather do it by hand:
 
 ```powershell
 cd <sbox-public>

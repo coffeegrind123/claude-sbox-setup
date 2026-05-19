@@ -4,7 +4,7 @@
     Apply claude-sbox's engine patches to a sbox-public checkout.
 
 .DESCRIPTION
-    claude-sbox depends on six small engine modifications to behave
+    claude-sbox depends on seven small engine modifications to behave
     correctly:
 
       1. engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs
@@ -60,7 +60,18 @@
          in this file wasn't adding them and tool publishes failed with
          hundreds of "type or namespace not found" errors. Maintainers-only.
 
-    This script applies all six patches to the parent sbox-public checkout.
+      7. engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs (fourth
+         block, immediately after CompileGroup creation). Sets the publish
+         CompileGroup's ReferenceProvider so cross-package references like
+         `package.toolbase` (from patch 6's AddToolBaseReference) can
+         resolve via PackageManager.ActivePackages.Lookup. In-editor compile
+         groups get a provider from their owning ActivePackage; the publish
+         CompileGroup is fresh and doesn't, so AddToolBaseReference throws
+         "Couldn't find reference package.toolbase" without this. Hands the
+         group any ActivePackage as the lookup root (they all share the
+         same global HashSet). Maintainers-only.
+
+    This script applies all seven patches to the parent sbox-public checkout.
     It is idempotent: re-running on a checkout where the patches are already
     applied is a no-op.
 

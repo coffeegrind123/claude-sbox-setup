@@ -79,10 +79,10 @@ $patchedFiles = [ordered]@{
     'engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs'         = '0002-sboxbuild-dedupe-manifest-paths.patch'
     'engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs'        = '0003-publish-compile-tool-type-projects.patch'
     'engine/Sandbox.Tools/StartupLoadProject.cs'                      = '0004-startuploadproject-claude-sbox-global-install.patch'
-    # Patches 0005 and 0006 also touch Utility.Projects.Compile.cs (in different blocks
-    # from patch 0003). Refresh-Patches can't regen multiple patches against the same
-    # working-tree file from a single map, so 0005 + 0006 are hand-maintained: edit them
-    # directly under patches/ if their content needs to change.
+    # Patches 0005, 0006, and 0007 also touch Utility.Projects.Compile.cs (in different
+    # blocks from patch 0003). Refresh-Patches can't regen multiple patches against the
+    # same working-tree file from a single map, so 0005-0007 are hand-maintained: edit
+    # them directly under patches/ if their content needs to change.
 }
 
 if (-not (Test-Path .\Bootstrap.bat)) {

@@ -1,0 +1,28 @@
+diff --git a/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs b/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
+index e9733c0d..de9afbb8 100644
+--- a/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
++++ b/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
+@@ -25,6 +25,23 @@ public static partial class EditorUtility
+ 			using CompileGroup compileGroup = new CompileGroup( "Publish" );
+ 			compileGroup.AccessControl = PackageManager.AccessControl;
+ 
++			// claude-sbox -- local engine modification. Give the publish CompileGroup
++			// a ReferenceProvider so cross-package references like `package.toolbase`
++			// can resolve via PackageManager.ActivePackages. In the in-editor compile
++			// path, each ActivePackage assigns itself as ReferenceProvider on its own
++			// CompileGroup (PackageManager.ActivePackage.cs:229); the publish path
++			// here builds a fresh CompileGroup without that wiring, so when
++			// AddToolBaseReference() (added by patch 6 for tool addons) tries to
++			// resolve "package.toolbase" the lookup fails with "Couldn't find
++			// reference package.toolbase" and the compile errors out.
++			//
++			// ActivePackage's Lookup walks every loaded ActivePackage's AssemblyFileSystem
++			// looking for a matching .dll, so any ActivePackage we hand to the group
++			// works as the lookup root -- they all share the same global ActivePackages
++			// HashSet. FirstOrDefault is fine because the lookup logic is identical
++			// across instances.
++			compileGroup.ReferenceProvider = PackageManager.ActivePackages.FirstOrDefault();
++
+ 			// claude-sbox -- local engine modification. The unconditional
+ 			// "editor" ignore is correct for game/library addons (Code/Editor/
+ 			// holds editor-only inspectors/tool windows that should NOT ship to
