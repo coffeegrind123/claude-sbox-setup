@@ -1,0 +1,41 @@
+diff --git a/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs b/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
+index 435218c3..e9733c0d 100644
+--- a/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
++++ b/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
+@@ -135,6 +135,36 @@ public static partial class EditorUtility
+ 			if ( project.Config.Type == "tool" )
+ 			{
+ 				compiler.GeneratedCode.AppendLine( "global using static Sandbox.Internal.GlobalToolsNamespace;" );
++
++				// claude-sbox -- local engine modification. Mirror the explicit
++				// assembly references the in-editor compile path adds for tool-
++				// type projects (engine/Sandbox.Engine/Systems/Project/Project/
++				// Project.Compiling.cs:109-122). Without these the publish-compile
++				// can't resolve Sandbox.Compiler, Microsoft.CodeAnalysis(.CSharp),
++				// Facepunch.ActionGraphs, SkiaSharp, etc. -- all assemblies that
++				// real tool addons routinely use. The in-editor compile works
++				// because it adds them; the publish-compile didn't, so tool
++				// publishes failed with hundreds of "type or namespace not found"
++				// errors. Plus AddToolBaseReference for everything except the
++				// toolbase project itself, so Editor.TreeView / AssetBrowser /
++				// ToastWidget / etc. resolve.
++				compiler.AddReference( "Sandbox.Tools" );
++				compiler.AddReference( "Sandbox.Compiling" );
++				compiler.AddReference( "System.Diagnostics.Process" );
++				compiler.AddReference( "System.Net.WebSockets" );
++				compiler.AddReference( "System.Net.WebSockets.Client" );
++				compiler.AddReference( "Microsoft.Win32.Registry" );
++				compiler.AddReference( "System.Memory" );
++				compiler.AddReference( "Sandbox.Bind" );
++				compiler.AddReference( "Facepunch.ActionGraphs" );
++				compiler.AddReference( "SkiaSharp" );
++				compiler.AddReference( "Microsoft.CodeAnalysis" );
++				compiler.AddReference( "Microsoft.CodeAnalysis.CSharp" );
++
++				if ( project.Package.CompilerName != "toolbase" )
++				{
++					compiler.AddToolBaseReference();
++				}
+ 			}
+ 
+ 			foreach ( var reference in compilerSettings.DistinctAssemblyReferences )
