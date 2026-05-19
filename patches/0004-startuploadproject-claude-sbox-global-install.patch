@@ -1,0 +1,77 @@
+diff --git a/engine/Sandbox.Tools/StartupLoadProject.cs b/engine/Sandbox.Tools/StartupLoadProject.cs
+index e2f85913..5af1aa8b 100644
+--- a/engine/Sandbox.Tools/StartupLoadProject.cs
++++ b/engine/Sandbox.Tools/StartupLoadProject.cs
+@@ -123,6 +123,58 @@ static class StartupLoadProject
+ 			AssetSystem.InitializeFromProject( project );
+ 		}
+ 
++		// claude-sbox -- local engine modification. Make the addon "install-once-use-
++		// everywhere": a one-time `package_install ghage.claude-sbox tools` in any
++		// project becomes a permanent auto-mount for every project. Scoped to
++		// ghage.claude-sbox only; all other cloud packages keep the engine's default
++		// per-project cache behaviour.
++		//
++		// 1. Pre-stage: copy package files from <sbox-public>/game/.sbox-global/cloud/
++		//    .bin/ into this project's <project>/.sbox/cloud/.bin/. The engine's size-
++		//    check in DownloadCloudFiles (AssetSystem.Cloud.cs:315) sees matching files
++		//    and skips the .cll redownload -- only the small manifest+metadata fetch
++		//    hits the network (~500ms).
++		// 2. Mount: PackageManager.InstallAsync(..., "tools") triggers ToolsDll's
++		//    OnPackageInstalledToContext subscription -> AssemblyEnroller.LoadPackage
++		//    -> EditorEvent.RegisterAssembly -> addon's [Event]/[InitializeOnLoad]
++		//    handlers are wired, and the next paint frame runs Boot.
++		// 3. Post-snapshot: copy this project's freshly-cached files back to the
++		//    global directory. Idempotent -- only writes when a destination file is
++		//    missing or wrong size. First install seeds it; subsequent installs are
++		//    no-ops.
++		try
++		{
++			var sboxGameRoot = FileSystem.Root.GetFullPath( "/" );
++			var globalBin = System.IO.Path.Combine( sboxGameRoot, ".sbox-global", "cloud", ".bin" );
++			var perProjectBin = System.IO.Path.Combine( FileSystem.Cloud.GetFullPath( "/" ), ".bin" );
++
++			System.IO.Directory.CreateDirectory( perProjectBin );
++
++			if ( System.IO.Directory.Exists( globalBin ) )
++			{
++				foreach ( var src in System.IO.Directory.GetFiles( globalBin, "package.ghage.claude-sbox.*" ) )
++				{
++					var dest = System.IO.Path.Combine( perProjectBin, System.IO.Path.GetFileName( src ) );
++					if ( !System.IO.File.Exists( dest ) || new System.IO.FileInfo( src ).Length != new System.IO.FileInfo( dest ).Length )
++						System.IO.File.Copy( src, dest, overwrite: true );
++				}
++			}
++
++			await PackageManager.InstallAsync( new PackageLoadOptions( "ghage.claude-sbox", "tools" ) );
++
++			System.IO.Directory.CreateDirectory( globalBin );
++			foreach ( var src in System.IO.Directory.GetFiles( perProjectBin, "package.ghage.claude-sbox.*" ) )
++			{
++				var dest = System.IO.Path.Combine( globalBin, System.IO.Path.GetFileName( src ) );
++				if ( !System.IO.File.Exists( dest ) || new System.IO.FileInfo( src ).Length != new System.IO.FileInfo( dest ).Length )
++					System.IO.File.Copy( src, dest, overwrite: true );
++			}
++		}
++		catch ( System.Exception e )
++		{
++			Log.Warning( e, "[claude-sbox] auto-mount failed -- run `package_install ghage.claude-sbox tools` in the dev console once per project." );
++		}
++
+ 		// Scan the project for libraries
+ 		Step( "Scanning libraries" );
+ 		using ( var _ = Bootstrap.StartupTiming?.ScopeTimer( $"Load Project: Init Libraries" ) )
+@@ -389,6 +441,13 @@ static class StartupLoadProject
+ 			required.Add( remotePackage.FullIdent );
+ 		}
+ 
++		// claude-sbox -- local engine modification. Protect the addon's cached
++		// package from cross-project eviction. Without this, opening a project that
++		// doesn't reference ghage.claude-sbox in its PackageReferences would wipe
++		// the per-project cloud cache for it; the next OpenProject's pre-stage step
++		// then has to copy back from the global cache (still works, just extra IO).
++		required.Add( "ghage.claude-sbox" );
++
+ 		foreach ( var ident in packagesToDownload )
+ 		{
+ 			// normalise into org.ident, without version, so we can easily check below

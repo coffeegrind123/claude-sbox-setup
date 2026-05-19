@@ -1,0 +1,43 @@
+diff --git a/engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs b/engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs
+index 3d436f73..e0c52de3 100644
+--- a/engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs
++++ b/engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs
+@@ -120,6 +120,38 @@ public partial class Project
+ 			AddFromFileBuiltIn( "editor/MovieMaker/.sbproj" );
+ 			AddFromFileBuiltIn( "editor/Hammer/.sbproj" );
+ 			AddFromFileBuiltIn( "editor/DooEditor/DooEditor.sbproj" );
++
++			// claude-sbox -- local engine modification. Auto-loads the ClaudeSbox
++			// MCP / terminal addon so the in-editor MCP host (127.0.0.1:6790) is
++			// up regardless of which project is the active one. Without this,
++			// the addon only loads when the claude-sbox .sbproj is the explicit
++			// active project, which forces the user to either always open
++			// claude-sbox.sbproj (and accept Project.Current pointing at the
++			// addon, polluting codegen targets) or manually add claude-sbox to
++			// every game project's EditorReferences. Tracked engine
++			// modification -- see CLAUDE.md "Tracked files we modify" table and
++			// Safe-Pull.ps1's $expectedPatches.
++			//
++			// Wrapped in try/catch because Project.AddFromFile throws
++			// "Couldn't add project." when the .sbproj is missing or
++			// fails to parse, and Project.InitializeBuiltIn is invoked
++			// via SyncContext.RunBlocking at engine/Sandbox.Engine/Core/
++			// Bootstrap.cs:174 -- an unhandled throw here aborts the
++			// editor before the splash screen clears, with no log dock
++			// available to surface the underlying cause. Catching here
++			// keeps the editor bootable so the user can repair the
++			// addon (or remove it) from a working editor. Compile
++			// errors in claude-sbox/Code/ surface separately via
++			// Project.CompileAsync at ToolsDll.Initialize time and are
++			// not caught here.
++			try
++			{
++				AddFromFileBuiltIn( "addons/claude-sbox/.sbproj" );
++			}
++			catch ( System.Exception e )
++			{
++				Log.Warning( e, $"[claude-sbox] auto-load failed -- editor will continue without the MCP host. Check game/logs/sbox-dev.log and game/data/claude-sbox-bootstrap-error.txt for the underlying cause. ({e.Message})" );
++			}
+ 		}
+ 
+ 		if ( syncPackageManager )

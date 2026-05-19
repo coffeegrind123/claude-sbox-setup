@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>claude-sbox · 512×910</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..900,0..100,0..1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:       #F4EEE3;
+    --ink:         #1A1714;
+    --ink-soft:    #463E36;
+    --muted:       #8A7F70;
+    --rule:        rgba(26, 23, 20, 0.16);
+    --rule-soft:   rgba(26, 23, 20, 0.09);
+    --accent:      #C0512F;
+    --accent-deep: #9A3F22;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); }
+  body {
+    width: 512px;
+    height: 910px;
+    overflow: hidden;
+    font-family: 'Inter', sans-serif;
+    color: var(--ink);
+  }
+  @media (min-width: 600px) {
+    html, body { width: auto; height: auto; background: #2a2522; }
+    body { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .poster { box-shadow: 0 24px 70px rgba(0,0,0,0.4); }
+  }
+
+  .poster {
+    width: 512px;
+    height: 910px;
+    position: relative;
+    background:
+      radial-gradient(ellipse 80% 30% at 88% 8%, rgba(192,81,47,0.06), transparent 65%),
+      radial-gradient(ellipse 70% 25% at 10% 95%, rgba(47,91,79,0.045), transparent 65%),
+      var(--paper);
+    overflow: hidden;
+  }
+  .poster::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(26,23,20,0.014) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(90deg, rgba(26,23,20,0.012) 0 1px, transparent 1px 4px);
+    pointer-events: none;
+    mix-blend-mode: multiply;
+  }
+
+  .reg {
+    position: absolute;
+    width: 7px; height: 7px;
+    border: 1.4px solid var(--ink);
+    border-radius: 50%;
+  }
+  .reg::after { content: ""; position: absolute; top: 50%; left: -6px; right: -6px; border-top: 1.4px solid var(--ink); }
+  .reg::before { content: ""; position: absolute; left: 50%; top: -6px; bottom: -6px; border-left: 1.4px solid var(--ink); }
+  .reg.tl { top: 14px; left: 14px; }
+  .reg.tr { top: 14px; right: 14px; }
+  .reg.bl { bottom: 14px; left: 14px; }
+  .reg.br { bottom: 14px; right: 14px; }
+
+  /* large watermark — sideways at the right edge for tall poster */
+  .wm {
+    position: absolute;
+    left: 50%;
+    top: 52%;
+    transform: translate(-50%, -50%) rotate(-12deg);
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 300;
+    font-size: 400px;
+    line-height: 1;
+    color: var(--ink);
+    opacity: 0.028;
+    pointer-events: none;
+    letter-spacing: -0.07em;
+    white-space: nowrap;
+  }
+
+  .frame {
+    position: absolute;
+    inset: 40px 38px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .eyebrow {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .eyebrow .left { display: flex; gap: 9px; align-items: center; }
+  .eyebrow .dot { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; transform: translateY(-1px); }
+  .eyebrow .sep { color: var(--muted); }
+  .eyebrow .url {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--ink);
+  }
+  .eyebrow .url .at { color: var(--accent); }
+
+  .rule-top { height: 1px; background: var(--rule); margin-top: 9px; }
+
+  /* stacked headline: claude / ·sbox */
+  .head {
+    margin-top: 26px;
+  }
+  h1 {
+    margin: 0;
+    font-family: 'Fraunces', serif;
+    font-weight: 500;
+    font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 1;
+    font-size: 116px;
+    line-height: 0.86;
+    letter-spacing: -0.05em;
+    color: var(--ink);
+  }
+  h1 .row { display: block; }
+  h1 .row.indent { padding-left: 0.08em; margin-top: 4px; }
+  h1 .amp {
+    color: var(--accent);
+    font-style: italic;
+    font-weight: 400;
+    font-variation-settings: "opsz" 144, "SOFT" 100, "WONK" 1;
+    margin-right: -0.03em;
+  }
+
+  .dek {
+    margin-top: 22px;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 350;
+    font-size: 19px;
+    line-height: 1.32;
+    color: var(--ink-soft);
+    max-width: 420px;
+  }
+  .dek .accent { color: var(--accent); font-style: normal; font-weight: 500; }
+
+  .subline {
+    margin-top: 16px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+    max-width: 420px;
+  }
+  .subline strong { color: var(--ink); font-weight: 600; }
+
+  /* stats — vertical stack */
+  .stats {
+    margin-top: 28px;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+  }
+  .stat-row {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: baseline;
+    gap: 18px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .stat-row:last-child { border-bottom: 0; }
+  .stat-row .n {
+    font-family: 'Fraunces', serif;
+    font-weight: 400;
+    font-variation-settings: "opsz" 144;
+    font-size: 38px;
+    line-height: 1;
+    letter-spacing: -0.035em;
+    color: var(--ink);
+    min-width: 116px;
+    display: flex;
+    align-items: baseline;
+    gap: 3px;
+  }
+  .stat-row .n .pre { font-size: 18px; color: var(--muted); transform: translateY(-7px); font-weight: 300; }
+  .stat-row .n .unit { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); transform: translateY(-5px); font-weight: 500; letter-spacing: 0; }
+  .stat-row .meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .stat-row .meta .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .stat-row .meta .sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .stat-row.feature .n {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 21px;
+    font-weight: 500;
+    color: var(--accent-deep);
+    letter-spacing: -0.005em;
+    min-width: 116px;
+  }
+
+  /* capabilities — vertical bullet column */
+  .caps {
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    line-height: 1.7;
+  }
+  .caps .item { padding: 0 8px; }
+  .caps .item:first-child { padding-left: 0; }
+  .caps .item.hot { color: var(--accent); }
+  .caps .sep { color: var(--muted); opacity: 0.55; }
+
+  .foot {
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px solid var(--rule);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .foot .cmd {
+    font-size: 9.5px;
+    font-weight: 500;
+    color: var(--ink-soft);
+    letter-spacing: 0;
+    line-height: 1.4;
+  }
+  .foot .cmd .prompt { color: var(--accent); font-weight: 700; margin-right: 4px; }
+  .foot .cmd .flag   { color: var(--muted); }
+  .foot .cmd .url-mcp{ color: var(--accent-deep); font-weight: 500; }
+  .foot .src {
+    font-size: 10px;
+    letter-spacing: 0;
+    color: var(--muted);
+  }
+  .foot .src .url { color: var(--ink); font-weight: 500; font-size: 11px; }
+  .foot .src .url .at { color: var(--accent); }
+</style>
+</head>
+<body>
+<main class="poster" role="img" aria-label="claude-sbox — Claude Code for the s&box editor. 593 MCP tools, 3 transports, port 6790.">
+
+  <span class="reg tl"></span>
+  <span class="reg tr"></span>
+  <span class="reg bl"></span>
+  <span class="reg br"></span>
+
+  <div class="wm">593</div>
+
+  <div class="frame">
+
+    <div class="eyebrow">
+      <div class="left">
+        <span class="dot"></span>
+        <span>Editor Tool · s&amp;box</span>
+      </div>
+      <div class="url">sbox.game<span class="at">/</span>ghage<span class="at">/</span>claude-sbox</div>
+    </div>
+    <div class="rule-top"></div>
+
+    <h1 class="head">
+      <span class="row">claude</span>
+      <span class="row indent"><span class="amp">·</span>sbox</span>
+    </h1>
+
+    <p class="dek">
+      Deep <span class="accent">Claude Code</span> integration —<br>
+      ~593 MCP tools for the s&amp;box editor.<br>
+      If a human can click it,<br>
+      the agent can drive it.
+    </p>
+
+    <div class="stats">
+      <div class="stat-row">
+        <div class="n"><span class="pre">~</span>593</div>
+        <div class="meta">
+          <div class="label">MCP Tools</div>
+          <div class="sub">Scene · Hammer · ModelDoc · Assets · Schema</div>
+        </div>
+      </div>
+      <div class="stat-row">
+        <div class="n">3<span class="unit">transports</span></div>
+        <div class="meta">
+          <div class="label">Concurrent on One Port</div>
+          <div class="sub">HTTP · SSE · Stdio Bridge</div>
+        </div>
+      </div>
+      <div class="stat-row">
+        <div class="n">25<span class="unit">+ events</span></div>
+        <div class="meta">
+          <div class="label">Editor Event Bus</div>
+          <div class="sub">scene.play · compile · hotload · content.changed</div>
+        </div>
+      </div>
+      <div class="stat-row feature">
+        <div class="n">:6790</div>
+        <div class="meta">
+          <div class="label">Localhost · No Auth</div>
+          <div class="sub">127.0.0.1 · works with any MCP client</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="caps">
+      <span class="item hot">Scene</span>
+      <span class="sep">·</span>
+      <span class="item">Inspector</span>
+      <span class="sep">·</span>
+      <span class="item">Hammer</span>
+      <span class="sep">·</span>
+      <span class="item">ModelDoc</span>
+      <span class="sep">·</span>
+      <span class="item">AnimGraph</span>
+      <span class="sep">·</span>
+      <span class="item">Assets</span>
+      <span class="sep">·</span>
+      <span class="item">Schema</span>
+      <span class="sep">·</span>
+      <span class="item">Roslyn</span>
+      <span class="sep">·</span>
+      <span class="item">Hotload</span>
+      <span class="sep">·</span>
+      <span class="item">Physics</span>
+      <span class="sep">·</span>
+      <span class="item">NavMesh</span>
+    </div>
+
+    <div class="foot">
+      <div class="cmd"><span class="prompt">$</span> claude mcp add <span class="flag">--transport http -s user</span> sbox <span class="url-mcp">http://127.0.0.1:6790/mcp</span></div>
+    </div>
+
+  </div>
+
+</main>
+</body>
+</html>

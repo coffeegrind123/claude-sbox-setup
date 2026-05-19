@@ -1,0 +1,30 @@
+diff --git a/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs b/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
+index 62fefd21..3c428cfb 100644
+--- a/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
++++ b/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
+@@ -108,6 +108,25 @@ public static partial class EditorUtility
+ 			compiler.GeneratedCode.AppendLine( "global using Microsoft.AspNetCore.Components;" );
+ 			compiler.GeneratedCode.AppendLine( "global using Microsoft.AspNetCore.Components.Rendering;" );
+ 
++			// claude-sbox -- local engine modification. Tool-type projects need
++			// Sandbox.Tools referenced + the Sandbox.Internal.GlobalToolsNamespace
++			// global using so addon code that touches EditorWindow / EditorTypeLibrary
++			// / EditorCookie / etc. compiles in the publish path. The editor's
++			// in-process compile (Project.Compiling.cs:131-139) already iterates
++			// compilerSettings.DistinctAssemblyReferences for every project type;
++			// the publish path here was written assuming game/library/addon shape
++			// and never picked them up, so tool-type publishes fail with
++			// CS0234 'GlobalToolsNamespace' on the addon's Imports.cs.
++			if ( project.Config.Type == "tool" )
++			{
++				compiler.GeneratedCode.AppendLine( "global using static Sandbox.Internal.GlobalToolsNamespace;" );
++			}
++
++			foreach ( var reference in compilerSettings.DistinctAssemblyReferences )
++			{
++				compiler.AddReference( reference );
++			}
++
+ 			foreach ( var c in compileGroup.Compilers )
+ 			{
+ 				// important - this is what is used by the error system to determine which addon it came from

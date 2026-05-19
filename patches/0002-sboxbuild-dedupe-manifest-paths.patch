@@ -1,0 +1,40 @@
+diff --git a/engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs b/engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs
+index da59ac67..d648c0c3 100644
+--- a/engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs
++++ b/engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs
+@@ -97,7 +97,34 @@ internal class DownloadPublicArtifacts( string name, bool nativeBinariesOnly = f
+ 		var failedCount = 0;
+ 		var parallelOptions = new ParallelOptions { MaxDegreeOfParallelism = MaxParallelDownloads };
+ 
+-		Parallel.ForEach( manifest.Files, parallelOptions, entry =>
++		// Dedupe by destination path. Some manifest revisions contain multiple
++		// entries pointing at the same `entry.Path` with different `entry.Sha256`
++		// values (a CDN/build-pipeline race). Without dedupe, parallel.ForEach
++		// fans out to threads that all open the same destination with
++		// FileShare.None at line 269 ╬ô├ç├╢ they race each other, the loser logs
++		// "being used by another process", and procmon shows only SboxBuild
++		// because it is literally fighting itself. Take the first occurrence
++		// per path; warn so the upstream defect is visible.
++		var seenPaths = new HashSet<string>( StringComparer.OrdinalIgnoreCase );
++		var deduplicated = new List<ArtifactFileInfo>( manifest.Files.Count );
++		foreach ( var entry in manifest.Files )
++		{
++			if ( string.IsNullOrWhiteSpace( entry.Path ) )
++			{
++				deduplicated.Add( entry );
++				continue;
++			}
++			if ( seenPaths.Add( entry.Path ) )
++			{
++				deduplicated.Add( entry );
++			}
++			else
++			{
++				Log.Warning( $"Manifest contains duplicate path '{entry.Path}' (extra sha256 {entry.Sha256}); skipping the duplicate." );
++			}
++		}
++
++		Parallel.ForEach( deduplicated, parallelOptions, entry =>
+ 		{
+ 			if ( string.IsNullOrWhiteSpace( entry.Path ) || string.IsNullOrWhiteSpace( entry.Sha256 ) )
+ 			{

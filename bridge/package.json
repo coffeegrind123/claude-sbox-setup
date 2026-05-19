@@ -1,0 +1,31 @@
+{
+  "name": "sbox-mcp-bridge",
+  "version": "0.3.0",
+  "description": "MCP stdio<->HTTP bridge for the s&box editor's in-process MCP server. Drop into your claude-sbox container so claude can call editor introspection / control tools running on the Windows host.",
+  "type": "module",
+  "main": "dist/bridge.js",
+  "bin": {
+    "sbox-mcp-bridge": "dist/bridge.js"
+  },
+  "scripts": {
+    "build": "bun build src/bridge.ts --target=node --outfile=dist/bridge.js --minify",
+    "dev": "bun --watch src/bridge.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/claude-sbox/claude-sbox",
+    "directory": "contrib/sbox-mcp-bridge"
+  }
+}

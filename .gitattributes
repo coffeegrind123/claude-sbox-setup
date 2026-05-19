@@ -1,0 +1,5 @@
+# Force LF line endings on .patch files regardless of the client's
+# core.autocrlf setting. `git apply` is whitespace-sensitive in
+# subtle ways; a CRLF-mangled patch file can fail to apply on Windows
+# even when --ignore-whitespace is set.
+*.patch text eol=lf

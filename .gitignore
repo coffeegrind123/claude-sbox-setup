@@ -1,0 +1,21 @@
+# Bridge node_modules — dev-only, runtime uses bundled dist/bridge.js
+bridge/node_modules/
+
+# Safe-Pull snapshot directory. Per-pull restore points, ~30 MB each.
+.backups/
+
+# Runtime output from Bootstrap-And-Capture.bat. Regenerated each run.
+bootstrap-out.log
+locked-files.txt
+
+# OS metadata
+Thumbs.db
+.DS_Store
+
+# IDE / editor
+.vs/
+.vscode/
+
+# Local environment overrides
+*.local
+*.local.*
