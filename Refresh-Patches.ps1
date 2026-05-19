@@ -81,6 +81,9 @@ $patchedFiles = [ordered]@{
     'engine/Sandbox.Tools/StartupLoadProject.cs'                      = '0004-startuploadproject-claude-sbox-global-install.patch'
     'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs' = '0009-cloud-mount-skip-whitelist-for-tool-packages.patch'
     'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageLoader.cs' = '0010-packageloader-trust-remote-tool-assemblies.patch'
+    # Patch 0011 also touches StartupLoadProject.cs (second block, just before
+    # patch 0004's InstallAsync of claude-sbox). Hand-maintained alongside 0004
+    # for the same multiplexed-file reason as 0005-0008.
     # Patches 0005, 0006, 0007, and 0008 also touch Utility.Projects.Compile.cs (in
     # different blocks from patch 0003). Refresh-Patches can't regen multiple patches
     # against the same working-tree file from a single map, so 0005-0008 are hand-

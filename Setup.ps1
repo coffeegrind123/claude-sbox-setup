@@ -4,7 +4,7 @@
     Apply claude-sbox's engine patches to a sbox-public checkout.
 
 .DESCRIPTION
-    claude-sbox depends on ten small engine modifications to behave
+    claude-sbox depends on eleven small engine modifications to behave
     correctly:
 
       1. engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs
@@ -113,7 +113,24 @@
           every cloud-install user needs this patch applied, paired
           with patch 9.
 
-    This script applies all ten patches to the parent sbox-public checkout.
+      11. engine/Sandbox.Tools/StartupLoadProject.cs (second insertion in
+          the same file as patch 4, immediately before patch 4's
+          InstallAsync of ghage.claude-sbox). Mounts local.toolbase
+          FIRST. The published claude-sbox.dll has a direct assembly
+          reference on package.toolbase (baked in by patch 6's
+          AddToolBaseReference). When the CLR runs the addon's static
+          constructors via RunAllStaticConstructors, it asks the
+          LoadContext to resolve `package.toolbase.dll`. In the
+          unpatched OpenProject sequence local.toolbase is mounted via
+          `PackageManager.InstallProjects( IsBuiltIn )` further down --
+          AFTER patch 4's auto-mount. Without patch 11 the order is
+          wrong and the addon throws System.IO.FileNotFoundException
+          for package.toolbase during static-ctor init, even though
+          patches 9 + 10 already cleared the whitelist gates.
+          PackageManager.InstallAsync is idempotent so the later
+          InstallProjects re-install of toolbase becomes a no-op.
+
+    This script applies all eleven patches to the parent sbox-public checkout.
     It is idempotent: re-running on a checkout where the patches are already
     applied is a no-op.
 

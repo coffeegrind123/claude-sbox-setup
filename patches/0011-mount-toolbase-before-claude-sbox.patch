@@ -1,0 +1,29 @@
+diff --git a/engine/Sandbox.Tools/StartupLoadProject.cs b/engine/Sandbox.Tools/StartupLoadProject.cs
+index 7877264b..c2a077e8 100644
+--- a/engine/Sandbox.Tools/StartupLoadProject.cs
++++ b/engine/Sandbox.Tools/StartupLoadProject.cs
+@@ -160,6 +160,24 @@ static class StartupLoadProject
+ 				}
+ 			}
+ 
++			// claude-sbox -- local engine modification. Mount local.toolbase
++			// BEFORE ghage.claude-sbox. The published claude-sbox.dll has a
++			// direct assembly reference on package.toolbase (baked in by patch
++			// 6's AddToolBaseReference); when the CLR runs the addon's static
++			// constructors via RunAllStaticConstructors, it asks the
++			// LoadContext to resolve `package.toolbase.dll` -- which fails with
++			// System.IO.FileNotFoundException if toolbase isn't loaded yet.
++			//
++			// In the unpatched engine, local.toolbase is mounted later in this
++			// same function via `PackageManager.InstallProjects( Project.All
++			// .Where( x => x.IsBuiltIn ) )` -- AFTER our auto-mount point. So
++			// without this line the load order is wrong and the addon never
++			// gets past static-ctor init even though patches 9 + 10 cleared
++			// the whitelist gates. PackageManager.InstallAsync is idempotent
++			// (it returns the already-active package on re-install) so this
++			// is a no-op when toolbase happens to be mounted earlier already.
++			await PackageManager.InstallAsync( new PackageLoadOptions( "local.toolbase", "tools" ) );
++
+ 			await PackageManager.InstallAsync( new PackageLoadOptions( "ghage.claude-sbox", "tools" ) );
+ 
+ 			System.IO.Directory.CreateDirectory( globalBin );

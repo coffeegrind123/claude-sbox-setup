@@ -85,7 +85,7 @@ Copy-Item -Recurse skill "$HOME/.claude/skills/sbox-live"
 
 ### Engine patches: what gets applied
 
-Setup applies ten patches to your sbox-public tree (all reversible, all shipped in `patches/` for inspection):
+Setup applies eleven patches to your sbox-public tree (all reversible, all shipped in `patches/` for inspection):
 
 1. **`Project.Static.cs`**: adds the addon to the engine's built-in addon list **if** a source clone is present at `game/addons/claude-sbox/`. Source-clone branch only; the sbox.game-install flow (the common case) gets auto-load from patch 4 instead.
 2. **`DownloadPublicArtifacts.cs`**: dedupes manifest entries by destination path. Fixes an upstream race where parallel artifact downloads fight over the same file when a manifest contains duplicate-path entries (causes confusing "being used by another process" failures during `Bootstrap.bat`).
@@ -97,6 +97,7 @@ Setup applies ten patches to your sbox-public tree (all reversible, all shipped 
 8. **`Utility.Projects.Compile.cs`** (fifth block, same area): nulls out `compileGroup.AccessControl` for tool-type publishes. The whitelist restricts game/library publishes to a curated API surface (no `Process`, `File`, `HttpClient`, raw `Editor.*` types) — correct for sandboxed runtime content where users may install untrusted code, but actively wrong for tool addons, which by design need full editor + .NET access. The in-editor compile never applies the whitelist; the publish path was the only place enforcing it. Without this patch tool publishes fail with ~700 "is not allowed when whitelist is enabled" errors. Game/library publishes still enforce the whitelist normally. Maintainers-only.
 9. **`PackageManager.ActivePackage.cs`** (cloud-mount counterpart to patch 8): nulls out `group.AccessControl` inside `CompileCodeArchive` when `Package.TypeName == "tool"`. This is the path users without a local source clone hit — `package_install ghage.claude-sbox tools` (or the engine auto-mount from patch 4) downloads the `.cll`, then `CompileCodeArchive` compiles it on the user's machine to load the addon. Without this patch, the user's compile hits the same whitelist wall as patch 8 fixes for the publisher, and the addon fails to load with "Whitelist violation(s), build unsuccessful". `Project.Compiling.cs:56` already sets `Whitelist=false` for source-clone-loaded tool projects; this patch mirrors that behaviour into the cloud-mount path. End-user-facing — every cloud-install user needs this patch applied.
 10. **`PackageLoader.cs`** (the second consumer-side whitelist gate, after patch 9): extends the "skip access control for tool assemblies" exemption to remote (cloud-mounted) tool packages. Patch 9 fixed the COMPILE-time whitelist; patch 10 fixes the DLL-LOAD-time whitelist that runs immediately after compile in `LoadAssemblyFromPackage`. Facepunch's original code gates the skip behind `ap.Package is LocalPackage` with a comment saying "This is used for tool packages which are ALWAYS local" — so cloud tool addons trip the check. Without this patch, the consumer's mount fails with hundreds of "Whitelist Error: X is not allowed when whitelist is enabled" PLUS "Couldn't resolve 'Microsoft.CodeAnalysis.CSharp / Facepunch.ActionGraphs / ...'" errors from `AccessControl.VerifyAssembly`'s metadata walker. Bypassing the whitelist via `TrustUnsafe` skips both. End-user-facing — pairs with patch 9 to make cloud-installed tool addons actually load.
+11. **`StartupLoadProject.cs`** (second insertion, just before patch 4's `InstallAsync` of claude-sbox): mounts `local.toolbase` first. The published `claude-sbox.dll` has a direct assembly reference on `package.toolbase` (baked in by patch 6's `AddToolBaseReference`). When the CLR runs the addon's static constructors via `RunAllStaticConstructors`, it asks the LoadContext to resolve `package.toolbase.dll` — which fails with `System.IO.FileNotFoundException` if toolbase isn't loaded yet. In the unpatched sequence, `local.toolbase` is mounted via `PackageManager.InstallProjects( IsBuiltIn )` further down in the same function — AFTER patch 4's auto-mount point. Without patch 11 the order is wrong and the addon throws even though patches 9 + 10 already cleared the whitelist. `InstallAsync` is idempotent so the later batch re-install is a no-op.
 
 ### Updating sbox-public
 
@@ -107,7 +108,7 @@ cd game\addons\claude-sbox-setup
 .\Safe-Pull.bat
 ```
 
-That snapshots your tracked-file edits and addon source (if you have one) to `.backups/<timestamp>/`, runs `git pull` on sbox-public, then re-applies the ten engine patches in one pass and verifies their post-pull markers. If you'd rather do it by hand:
+That snapshots your tracked-file edits and addon source (if you have one) to `.backups/<timestamp>/`, runs `git pull` on sbox-public, then re-applies the eleven engine patches in one pass and verifies their post-pull markers. If you'd rather do it by hand:
 
 ```powershell
 cd <sbox-public>
