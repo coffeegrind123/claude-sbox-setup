@@ -1,0 +1,35 @@
+diff --git a/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageLoader.cs b/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageLoader.cs
+index 16505758..96073cd3 100644
+--- a/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageLoader.cs
++++ b/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageLoader.cs
+@@ -248,6 +248,30 @@ internal sealed partial class PackageLoader : IDisposable
+ 			if ( localPackage.Project.Config.IsStandaloneOnly ) needsAccessControl = false;
+ 		}
+ 
++		// claude-sbox -- local engine modification. Extend the "tool assemblies
++		// skip access control" exemption (line above) to REMOTE tool packages.
++		// Facepunch's original logic gates the skip behind `is LocalPackage`,
++		// and the comment three lines down explicitly says "This is used for
++		// tool packages which are ALWAYS local" -- i.e. they never anticipated
++		// cloud-distributed tool addons. Without this, every sbox.game-installed
++		// tool package fails at LoadAssemblyFromPackage with "Whitelist Error:
++		// X is not allowed when whitelist is enabled" against every editor /
++		// reflection / Process / HttpClient / Roslyn / ActionGraphs API the
++		// addon legitimately uses, AND every "Couldn't resolve 'X.Y.Z'" error
++		// from AccessControl.VerifyAssembly's metadata walker tripping on
++		// references it doesn't have in its sandbox-allowed set. Bypassing the
++		// whitelist via TrustUnsafe (which is what `!needsAccessControl` does
++		// below) skips both -- the assembly loads with full trust, same as a
++		// local tool addon would.
++		//
++		// Gated on isToolAssembly + ToolsMode so we don't accidentally trust
++		// game-content packages or runtime-server packages; this is strictly
++		// the editor-tool-package case.
++		if ( ToolsMode && isToolAssembly )
++		{
++			needsAccessControl = false;
++		}
++
+ 		//
+ 		// If this is a locally compiled package, and it's enabled - then skip
+ 		// access control. This is used for tool packages which are ALWAYS local.

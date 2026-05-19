@@ -4,7 +4,7 @@
     Apply claude-sbox's engine patches to a sbox-public checkout.
 
 .DESCRIPTION
-    claude-sbox depends on nine small engine modifications to behave
+    claude-sbox depends on ten small engine modifications to behave
     correctly:
 
       1. engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs
@@ -96,7 +96,24 @@
          9 fixes the consuming side -- both needed for end-to-end cloud
          distribution of a tool addon.
 
-    This script applies all nine patches to the parent sbox-public checkout.
+      10. engine/Sandbox.Engine/Services/Packages/PackageManager/
+          PackageLoader.cs. Patch 9 fixed the cloud-mount COMPILE-time
+          whitelist (CompileCodeArchive); patch 10 fixes the cloud-mount
+          DLL-LOAD-time whitelist (LoadAssemblyFromPackage). Facepunch's
+          original logic skips access control for tool assemblies only
+          when `ap.Package is LocalPackage`; the surrounding comment
+          literally says "This is used for tool packages which are
+          ALWAYS local." With cloud-installed tool addons the package is
+          a REMOTE Package, that branch never fires, and every cloud
+          tool addon hits hundreds of "Whitelist Error: X is not allowed
+          when whitelist is enabled" plus "Couldn't resolve 'Microsoft
+          .CodeAnalysis.CSharp / Facepunch.ActionGraphs / ...'" from
+          AccessControl.VerifyAssembly's metadata walker. Patch 10
+          extends the skip to remote tool assemblies. End-user-facing --
+          every cloud-install user needs this patch applied, paired
+          with patch 9.
+
+    This script applies all ten patches to the parent sbox-public checkout.
     It is idempotent: re-running on a checkout where the patches are already
     applied is a no-op.
 

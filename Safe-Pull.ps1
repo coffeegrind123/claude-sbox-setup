@@ -152,6 +152,7 @@ $expectedPatches = @{
     'engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs' = 'project.Config.Type == "tool"'
     'engine/Sandbox.Tools/StartupLoadProject.cs' = '.sbox-global'
     'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs' = 'Package.TypeName == "tool"'
+    'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageLoader.cs' = 'Extend the "tool assemblies'
     # Utility.Projects.Compile.cs is touched by patches 0003 + 0005 + 0006 + 0007 + 0008
     # (different blocks). The marker above covers patch 0003's GlobalToolsNamespace
     # conditional; patches 0005-0008's individual blocks aren't independently verified
