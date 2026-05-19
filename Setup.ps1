@@ -4,7 +4,7 @@
     Apply claude-sbox's engine patches to a sbox-public checkout.
 
 .DESCRIPTION
-    claude-sbox depends on seven small engine modifications to behave
+    claude-sbox depends on eight small engine modifications to behave
     correctly:
 
       1. engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs
@@ -71,7 +71,18 @@
          group any ActivePackage as the lookup root (they all share the
          same global HashSet). Maintainers-only.
 
-    This script applies all seven patches to the parent sbox-public checkout.
+      8. engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs (fifth
+         block, also near the CompileGroup creation). Nulls out the
+         AccessControl whitelist for tool-type publishes. The whitelist
+         restricts game/library publishes to a curated API surface (no
+         Process, File, HttpClient, raw editor types, ...) -- correct for
+         sandboxed runtime content but actively wrong for tool addons,
+         which by design need full editor + .NET access. In-editor compile
+         never applies this whitelist; the publish path was the only place
+         enforcing it. Without this patch tool publishes fail with ~700
+         "is not allowed when whitelist is enabled" errors. Maintainers-only.
+
+    This script applies all eight patches to the parent sbox-public checkout.
     It is idempotent: re-running on a checkout where the patches are already
     applied is a no-op.
 
