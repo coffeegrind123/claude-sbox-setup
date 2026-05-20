@@ -222,7 +222,14 @@ fi
 
 # Apply every patch on disk in numeric-prefix order. The order matters —
 # patches 0005-0008 stack on the file 0003 modifies, so 0003 must land first.
-step "Re-applying engine patches (git apply --3way) from patches/ on disk"
+#
+# Apply strategy: strict first, --3way only as fallback. The earlier version
+# used --3way unconditionally, which fails for stacked patches (0005-0008):
+# their "before" blob hash refers to HEAD+0003 state which isn't a git-
+# tracked blob, so --3way can't find it and produces conflict markers on
+# what would be a clean strict apply against the already-0003-patched
+# working tree.
+step "Re-applying engine patches from patches/ on disk"
 PATCHES_DIR="$SETUP_DIR/patches"
 mapfile -t ALL_PATCHES < <(find "$PATCHES_DIR" -maxdepth 1 -name "*.patch" -type f | sort)
 if [ "${#ALL_PATCHES[@]}" -eq 0 ]; then
@@ -233,11 +240,28 @@ fi
 FAILED_PATCHES=()
 for patch_path in "${ALL_PATCHES[@]}"; do
     patch_name="$(basename "$patch_path")"
-    if git apply --3way --ignore-whitespace "$patch_path" 2>&1 | sed 's/^/    /'; then
+
+    # Tier 1: strict git apply against the current working tree. Works for
+    # the entire chain when patches are applied in numeric order and the
+    # working tree carries the cumulative effect of all prior patches.
+    if git apply --ignore-whitespace "$patch_path" >/dev/null 2>&1; then
         ok "$patch_name applied"
-    else
-        FAILED_PATCHES+=("$patch_path")
+        continue
     fi
+    strict_err="$(git apply --ignore-whitespace "$patch_path" 2>&1)"
+
+    # Tier 2: --3way. Useful when upstream rewrote the lines a patch
+    # targets — git uses blob hashes in the patch header to 3-way merge.
+    if git apply --3way --ignore-whitespace "$patch_path" >/dev/null 2>&1; then
+        ok "$patch_name applied (3way)"
+        continue
+    fi
+    threeway_err="$(git apply --3way --ignore-whitespace "$patch_path" 2>&1)"
+
+    warn "$patch_name failed both strict and --3way:"
+    echo "$strict_err" | sed 's/^/    [!!]   strict: /'
+    echo "$threeway_err" | sed 's/^/    [!!]   3way:   /'
+    FAILED_PATCHES+=("$patch_path")
 done
 
 if [ "${#FAILED_PATCHES[@]}" -gt 0 ]; then

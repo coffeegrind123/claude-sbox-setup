@@ -428,7 +428,15 @@ if ($pullExit -ne 0) {
 # sort matters: patches 0005-0008 stack on the file 0003 already modified,
 # so 0003 must land first. Get-ChildItem + Sort-Object Name gives us that
 # ordering for free as long as the .patch filenames keep their NNNN- prefix.
-Step "Re-applying engine patches (git apply --3way) from patches/ on disk"
+#
+# Apply strategy: strict first, --3way only as fallback. The earlier version
+# of this script used --3way unconditionally, which fails for stacked
+# patches (0005-0008): their "before" blob hash refers to HEAD+0003 state
+# which isn't a git-tracked blob, so --3way can't find it and produces
+# conflict markers on what would be a clean strict apply against the
+# already-0003-patched working tree. Mirrors Setup.ps1's tier 1 → tier 2
+# escalation.
+Step "Re-applying engine patches from patches/ on disk"
 $allPatches = Get-ChildItem (Join-Path $SetupDir 'patches') -Filter '*.patch' -ErrorAction SilentlyContinue | Sort-Object Name
 if ($allPatches.Count -eq 0) {
     Err "No .patch files under $SetupDir\patches\ — nothing to re-apply. Engine files are at HEAD-before-pull."
@@ -438,13 +446,29 @@ if ($allPatches.Count -eq 0) {
 $failedPatches = @()
 foreach ($patchFile in $allPatches) {
     $patchPath = $patchFile.FullName
-    $applyOutput = Invoke-Native git apply --3way $patchPath
-    $applyOutput | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        $failedPatches += $patchPath
-    } else {
+
+    # Tier 1: strict git apply against the current working tree. Works for
+    # the entire chain when the patches are applied in numeric order and
+    # the working tree carries the cumulative effect of all prior patches.
+    $strictOut = Invoke-Native git apply --ignore-whitespace $patchPath
+    if ($LASTEXITCODE -eq 0) {
         Ok "$($patchFile.Name) applied"
+        continue
     }
+
+    # Tier 2: --3way. Useful when upstream rewrote the lines a patch
+    # targets — git uses the blob hashes in the patch header to find
+    # the original blob in its object DB and 3-way merges.
+    $threewayOut = Invoke-Native git apply --3way --ignore-whitespace $patchPath
+    if ($LASTEXITCODE -eq 0) {
+        Ok "$($patchFile.Name) applied (3way)"
+        continue
+    }
+
+    Warn "$($patchFile.Name) failed both strict and --3way:"
+    $strictOut | ForEach-Object { Warn "  strict: $_" }
+    $threewayOut | ForEach-Object { Warn "  3way:   $_" }
+    $failedPatches += $patchPath
 }
 if ($failedPatches.Count -gt 0) {
     Err "$($failedPatches.Count) patch(es) failed to apply cleanly:"
