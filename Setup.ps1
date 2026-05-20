@@ -139,28 +139,95 @@
     patches automatically. Falling back to plain `git pull` followed by
     re-running this Setup.ps1 also works but skips the safety net.
 
+.PARAMETER Dev
+    Run the developer install: apply every engine patch, write the managed
+    `.gitignore` block, and print dev-workflow next-steps. Required if you
+    have (or want to start) a source clone of claude-sbox at
+    game/addons/claude-sbox/.
+
+    Without -Dev the script prints consumer instructions and exits without
+    touching the engine. The consumer path uses `package_install
+    ghage.claude-sbox tools` from the in-editor console.
+
 .PARAMETER DryRun
-    Show what would be done without modifying any files.
+    Show what would be done without modifying any files. Implies -Dev (only
+    meaningful when applying patches).
 
 .PARAMETER Force
     Re-apply patches even if they appear to be already applied. Use this if
-    you suspect the in-place patch text has been mangled.
+    you suspect the in-place patch text has been mangled. Implies -Dev.
 
 .EXAMPLE
     .\Setup.ps1
-    Apply the patches.
+    Print consumer install instructions and exit.
 
 .EXAMPLE
-    .\Setup.ps1 -DryRun
-    Preview without writing.
+    .\Setup.ps1 -Dev
+    Apply every engine patch and write the managed .gitignore block.
+
+.EXAMPLE
+    .\Setup.ps1 -Dev -DryRun
+    Preview the developer install without writing.
 #>
 [CmdletBinding()]
 param(
+    [switch]$Dev,
     [switch]$DryRun,
     [switch]$Force
 )
 
 $ErrorActionPreference = 'Continue'
+
+# -DryRun / -Force are only meaningful when applying patches, so they
+# imply -Dev. Without this a user passing only -DryRun would silently
+# fall into consumer mode and see the "exit immediately" path, which is
+# confusing — they clearly intended to preview the patch apply.
+if ($DryRun -or $Force) { $Dev = $true }
+
+# ---------------------------------------------------------------------------
+# Consumer path. The default. No engine touches, no clone, no managed
+# .gitignore writes — just printing the one-line `package_install` flow
+# that cloud installers use. Exits 0 before any state is mutated.
+#
+# Why this is the default: most people who clone claude-sbox-setup are
+# end-users looking for the install command, not contributors planning to
+# edit addon source. The contributor path is the explicit `-Dev` opt-in;
+# everyone else gets a fast no-op + the editor-console command.
+#
+# Note: the consumer path assumes the engine has already been patched
+# (otherwise `package_install` will fail at compile/load time with
+# whitelist errors from patches 9/10). For a fresh sbox-public checkout
+# the user MUST run with -Dev at least once to apply the patches, then
+# they can choose source-clone (continue with -Dev) or cloud-install
+# (skip the source clone and use `package_install` in the editor).
+# This trade-off is called out in the consumer banner below so users
+# aren't surprised.
+# ---------------------------------------------------------------------------
+if (-not $Dev) {
+    Write-Host ""
+    Write-Host "==> claude-sbox setup (consumer mode)" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Install claude-sbox as a cloud package:" -ForegroundColor Yellow
+    Write-Host "  1. Launch  <sbox-public>\game\sbox-dev.exe  (any project)"
+    Write-Host "  2. Open the developer console (~ key)"
+    Write-Host "  3. Run:    package_install ghage.claude-sbox tools"
+    Write-Host "  4. Restart the editor"
+    Write-Host ""
+    Write-Host "The in-editor MCP host comes up on  http://127.0.0.1:6790"
+    Write-Host "Connect Claude Code:"
+    Write-Host "  claude mcp add --transport http -s user sbox http://127.0.0.1:6790/mcp"
+    Write-Host "  (or http://host.docker.internal:6790/mcp from a devcontainer)"
+    Write-Host ""
+    Write-Host "Note: cloud install requires the claude-sbox engine patches to be" -ForegroundColor DarkGray
+    Write-Host "applied on this sbox-public checkout. If your editor logs whitelist" -ForegroundColor DarkGray
+    Write-Host "errors at compile/mount time, re-run with -Dev to apply them:" -ForegroundColor DarkGray
+    Write-Host "    .\Setup.ps1 -Dev" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "For source-clone developer setup (edit addon code, contribute back)," -ForegroundColor Cyan
+    Write-Host "use:  .\Setup.ps1 -Dev"                                              -ForegroundColor Cyan
+    Write-Host ""
+    exit 0
+}
 
 # Helper: run `git ...` and return ($exitCode, $stdoutPlusStderr) without
 # triggering PowerShell's NativeCommandError termination on non-zero exit.
