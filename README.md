@@ -8,21 +8,57 @@ The addon itself is a compiled tool package published to sbox.game. This repo ho
 
 ## Quick start
 
-claude-sbox supports two install modes:
+A working claude-sbox install has **two layers**:
 
-- **Consumer install** (the default — most users want this): drop-in via `package_install ghage.claude-sbox tools` in the editor console. Setup script just prints the one-line install command and exits — no engine touches, no source clone. Cloud install requires the host sbox-public to have the claude-sbox engine patches applied at build time; if the editor reports whitelist errors at mount, switch to the developer install path below to apply them yourself.
-- **Developer install** (`-Dev` / `--dev` flag): clone the addon source into `game/addons/claude-sbox/`, apply every engine patch, and wire up the local source-tree workflow. For contributors who want to edit addon code, or anyone running against a fresh upstream sbox-public that hasn't been pre-patched.
+1. **Engine patches on sbox-public** — required by *both* install methods below. Cloud install fails with whitelist errors at mount time without patches 9 / 10 / 11; the global auto-mount and toolbase load-order depend on patches 4 / 11; the publish path requires patch 3. Apply once via `Setup.bat` (Windows) / `./Setup.sh` (Linux); idempotent — safe to re-run after every `git pull` on sbox-public.
+2. **The addon itself** — install via either method:
+   - **Cloud install** (most users): run `package_install ghage.claude-sbox tools` in the editor's developer console. The compiled addon lives in `<sbox-public>/game/.sbox-global/cloud/.bin/` and auto-mounts on every project load (patch 4).
+   - **Source-clone install** (contributors): `git clone https://github.com/coffeegrind123/claude-sbox.git` into `<sbox-public>/game/addons/claude-sbox/`. Patch 1 detects the clone and auto-mounts as a built-in addon.
 
-claude-sbox also supports two host OSes:
+The two install methods are not mutually exclusive — source-clone takes precedence when both are present, so a contributor can switch between testing their local edits and the cloud-published version by deleting / restoring the source dir.
+
+claude-sbox supports two host OSes:
 
 - **Windows** — Facepunch's official [sbox-public](https://github.com/Facepunch/sbox-public). Default path; everything below uses `.bat`/`.ps1`.
 - **Linux** — the community [joshuascript/sbox-public](https://github.com/joshuascript/sbox-public) fork. Adds an Anvil-based native-patch layer (LD_PRELOAD shims for case-insensitive filesystem + Vulkan crash fixes) so the engine runs without Proton. Use the `.sh` siblings of every setup script.
 
 Pick your track below.
 
-### Consumer install
+### What `Setup.bat` / `Setup.sh` actually does
 
-Open `sbox-dev` (Windows: `sbox-dev.exe`; Linux: via Anvil's launcher), pull up the developer console, and run **once, ever**:
+The same script runs for both cloud-install users (no source clone, addon comes from sbox.game) and source-clone developers. It does **not** install the addon — there's no `package_install`-from-script, no `git clone`-of-the-addon-repo. All it does is patch the engine. The addon itself is installed afterward via whichever method you prefer.
+
+| Invocation | What runs |
+|---|---|
+| `Setup.bat` &nbsp;/&nbsp; `./Setup.sh` | **Apply engine patches.** Runs `git apply` (with strict → `--3way` → CRLF → fuzzy tiers) for every file in `patches/`, writes the managed `.gitignore` block at the sbox-public root, and verifies post-apply state. Idempotent — already-applied patches are detected and skipped. Required step for **both** install paths (cloud and source-clone), because patches 9 / 10 / 11 fix the cloud-mount whitelist + load-order gates that block `package_install ghage.claude-sbox tools` from working. Run once after `git clone sbox-public`; re-run after every `git pull` on sbox-public. |
+| `Setup.bat -DryRun` &nbsp;/&nbsp; `./Setup.sh --dry-run` | Show what each patch would do without writing. Useful pre-flight when you want to see whether upstream rewrote any patch context. |
+| `Setup.bat -Force` &nbsp;/&nbsp; `./Setup.sh --force` | Bypass the "already applied" idempotency probe. Use only when the in-place patch text was mangled and you need to re-apply from scratch. |
+
+(`-Dev` / `--dev` is accepted as a silent no-op alias — older docs and muscle memory still work but the flag does nothing.)
+
+What the script does **not** do, for either audience:
+
+- It does **not** clone the addon source. If you want the source tree at `<sbox-public>/game/addons/claude-sbox/`, you `git clone` that yourself (see "Source-clone install" below). Patch 1 detects the clone and auto-mounts it as a built-in addon when present.
+- It does **not** run `package_install`. The `.cll` and `.xml` for the cloud-published addon get downloaded inside the editor, not from a CLI. Setup tells you the exact command to paste into the editor console as part of its post-apply Next-Steps.
+- It does **not** modify any file under `game/addons/claude-sbox/` (cloud install never has this dir; source-clone install owns it and the script never touches it).
+
+So both audiences run the **same** `Setup.bat` to patch the engine. The difference between the two install paths is what happens **after** — cloud users open the editor console and run `package_install ghage.claude-sbox tools`; source-clone developers additionally `git clone` the addon source.
+
+### Cloud install (no source clone)
+
+**Prerequisite**: the engine must be patched. From `<sbox-public>/game/addons/claude-sbox-setup/`:
+
+```powershell
+# Windows
+.\Setup.bat
+
+# Linux
+./Setup.sh
+```
+
+(Skip if you cloned a pre-patched sbox-public fork or have already run this once. Setup is idempotent — re-running on a patched tree is a no-op.)
+
+Then open `sbox-dev` (Windows: `sbox-dev.exe`; Linux: via Anvil's launcher), pull up the developer console, and run **once, ever**:
 
 ```
 package_install ghage.claude-sbox tools
@@ -30,11 +66,9 @@ package_install ghage.claude-sbox tools
 
 Restart the editor. The in-editor MCP host comes up on `http://127.0.0.1:6790`. Done.
 
-If the editor logs whitelist errors at compile/mount time, your sbox-public hasn't been patched. Run the developer install path once to apply the patches, then come back to this — `package_install` is still the cloud-mount you want, the patches are just a one-time engine fix.
+### Source-clone install — Windows
 
-You can also run `.\Setup.bat` (Windows) or `./Setup.sh` (Linux) with no arguments to get the same one-line install reminder printed back at you.
-
-### Developer install — Windows
+This path includes everything the cloud install gets, plus a working tree of the addon source you can edit, hot-reload, and contribute back.
 
 You need a working [sbox-public](https://github.com/Facepunch/sbox-public) checkout (`git clone --recursive https://github.com/Facepunch/sbox-public`).
 
@@ -48,11 +82,11 @@ git clone https://github.com/coffeegrind123/claude-sbox-setup.git
 **2. From the new `claude-sbox-setup/` directory, apply the engine patches and rebuild:**
 
 ```powershell
-.\Setup.bat -Dev
+.\Setup.bat
 .\Bootstrap-And-Capture.bat
 ```
 
-`Setup.bat -Dev` applies the engine patches to the parent sbox-public tree and verifies them; idempotent — re-run after any `git pull` on sbox-public. **Without `-Dev`, `Setup.bat` prints consumer-install instructions and exits without touching the engine** — the `-Dev` flag is the explicit opt-in for the developer / source-clone workflow. `Bootstrap-And-Capture.bat` is a wrapper around upstream's `Bootstrap.bat` that detects and stops any process holding `game/bin/managed/*.dll` open (lingering sbox-dev, VBCSCompiler, MSBuild, the dotnet build server, etc.) before the managed-DLL rebuild starts, so you don't hit the `MSB3021: ...being used by another process` cascade.
+`Setup.bat` applies the engine patches to the parent sbox-public tree and verifies them; idempotent — re-run after any `git pull` on sbox-public. Both install paths (cloud and source-clone) need this step because patches 9 / 10 / 11 fix the cloud-mount whitelist gates that block `package_install`. `Bootstrap-And-Capture.bat` is a wrapper around upstream's `Bootstrap.bat` that detects and stops any process holding `game/bin/managed/*.dll` open (lingering sbox-dev, VBCSCompiler, MSBuild, the dotnet build server, etc.) before the managed-DLL rebuild starts, so you don't hit the `MSB3021: ...being used by another process` cascade.
 
 **3. Launch the editor and seed the addon:**
 
@@ -70,7 +104,9 @@ That's the one-time install step. Patch 0004 (the cloud auto-mount) snapshots th
 
 The in-editor MCP host comes up automatically on `http://127.0.0.1:6790`.
 
-### Developer install — Linux
+### Source-clone install — Linux
+
+This path includes everything the cloud install gets, plus a working tree of the addon source you can edit, hot-reload, and contribute back.
 
 You need the joshuascript Linux fork of sbox-public, plus `gcc` (for compiling Anvil's native patches), `python3` (for crash analysis tools), and the .NET 10 SDK.
 
@@ -95,11 +131,11 @@ When it prompts `Build managed artifacts now? [y/N]`, answer **y**.
 cd game/addons/
 git clone https://github.com/coffeegrind123/claude-sbox-setup.git
 cd claude-sbox-setup
-./Setup.sh --dev
+./Setup.sh
 ./Bootstrap-And-Capture.sh
 ```
 
-`Setup.sh --dev` applies the same 7 engine patches the Windows path uses (cross-platform `git diff` files, no `.bat`-specific content). **Without `--dev`, `Setup.sh` prints consumer-install instructions and exits without touching the engine** — `--dev` is the explicit opt-in for the developer / source-clone workflow. `Bootstrap-And-Capture.sh` wraps the fork's `bash bootstrap` script with file-lock detection (via `lsof +D`, rare on Linux) and log capture.
+`Setup.sh` applies the same 7 engine patches the Windows path uses (cross-platform `git diff` files, no `.bat`-specific content). Idempotent — re-run after any `git pull` on sbox-public. `Bootstrap-And-Capture.sh` wraps the fork's `bash bootstrap` script with file-lock detection (via `lsof +D`, rare on Linux) and log capture.
 
 **4. Launch the editor via Anvil's wrapper (NOT the `sbox-dev` binary directly — Anvil sets up the LD_PRELOAD chain):**
 
@@ -166,7 +202,7 @@ Copy-Item -Recurse skill "$HOME/.claude/skills/sbox-live"
 
 ### Engine patches: what gets applied
 
-`Setup.bat -Dev` (Windows) / `./Setup.sh --dev` (Linux) applies seven patches to your sbox-public tree (all reversible, all shipped in `patches/` for inspection). Default `Setup` without `-Dev` / `--dev` is consumer-mode: prints the `package_install` reminder and exits without touching anything.
+`Setup.bat` (Windows) / `./Setup.sh` (Linux) applies seven patches to your sbox-public tree (all reversible, all shipped in `patches/` for inspection). Idempotent — already-applied patches are skipped, so re-running on a patched tree is a no-op.
 
 1. **`Project.Static.cs`**: adds the addon to the engine's built-in addon list **if** a source clone is present at `game/addons/claude-sbox/`. Source-clone branch only; the sbox.game-install flow (the common case) gets auto-load from patch 4 instead.
 2. **`DownloadPublicArtifacts.cs`**: dedupes manifest entries by destination path. Fixes an upstream race where parallel artifact downloads fight over the same file when a manifest contains duplicate-path entries (causes confusing "being used by another process" failures during `Bootstrap.bat`).
@@ -206,8 +242,8 @@ cd <sbox-public>\game\addons\claude-sbox-setup
 #
 #    Most common case: markers missing because Setup was never run
 #    on this clone, or `git checkout HEAD -- engine/` discarded the
-#    applied patches. Fix is:  .\Setup.bat -Dev  (idempotent, re-
-#    applies only what's missing).
+#    applied patches. Fix is:  .\Setup.bat  (idempotent, re-applies
+#    only what's missing).
 #
 #    NOTE: a healthy post-Setup tree DOES have 6 modified files
 #    under engine/ — those are the applied patches and you want to
@@ -215,7 +251,7 @@ cd <sbox-public>\game\addons\claude-sbox-setup
 #    in (e.g. you manually tweaked an engine source while debugging
 #    and forgot). DO NOT `git checkout HEAD -- engine/` to "clean
 #    up" before Safe-Pull — that wipes the patches Setup just
-#    applied, and you'll have to re-run Setup.bat -Dev to recover.
+#    applied, and you'll have to re-run Setup.bat to recover.
 ```
 
 #### Update tooling FIRST
@@ -281,9 +317,9 @@ claude mcp list
 | Where it broke | What it usually means | What to do |
 |---|---|---|
 | Step 3 `git pull` refuses | Local changes in the setup repo | `git status`, commit / stash, then pull |
-| Step 4 — `Tracked patches missing or modified` pre-pull | `.gitignore` marker missing OR an engine file drifted | Re-run `.\Setup.bat -Dev` (writes the marker, idempotently re-applies patches) |
-| Step 4 — `X patch(es) failed to apply cleanly` post-pull | Upstream rewrote a line a patch depends on | Open the failing `.patch` file + the target side-by-side, hand-merge the hunk, run `.\Refresh-Patches.bat` to recapture, then `.\Setup.bat -Dev` to finish |
-| Step 4 leaves the engine in `Unmerged paths` state | 3-way merge produced conflict markers | `cd <sbox-public>; git checkout HEAD -- engine/` to reset, then `git stash pop` to restore `.gitignore`, then `.\Setup.bat -Dev` for a clean re-apply |
+| Step 4 — `Tracked patches missing or modified` pre-pull | `.gitignore` marker missing OR an engine file drifted | Re-run `.\Setup.bat` (writes the marker, idempotently re-applies patches) |
+| Step 4 — `X patch(es) failed to apply cleanly` post-pull | Upstream rewrote a line a patch depends on | Open the failing `.patch` file + the target side-by-side, hand-merge the hunk, run `.\Refresh-Patches.bat` to recapture, then `.\Setup.bat` to finish |
+| Step 4 leaves the engine in `Unmerged paths` state | 3-way merge produced conflict markers | `cd <sbox-public>; git checkout HEAD -- engine/` to reset, then `git stash pop` to restore `.gitignore`, then `.\Setup.bat` for a clean re-apply |
 | Step 4 partially completed and you want to roll back fully | Anything | `.\Restore-From-Backup.bat -Snapshot <timestamp> -Yes` (the timestamp is printed at the bottom of the failed Safe-Pull output) |
 | Step 5 `MSB3021 ... being used by another process` | Lingering sbox-dev / VBCSCompiler / dotnet build server | Re-run `.\Bootstrap-And-Capture.bat` (it has built-in lock-holder detection); or `.\Prepare-Bootstrap.bat -Yes` directly if you want to inspect first |
 | Step 7 editor launches but no addon | Package cache wiped or first-time install on this clone | Developer console → `package_install ghage.claude-sbox tools` |
@@ -298,7 +334,7 @@ cd <sbox-public>
 git pull
 cd game\addons\claude-sbox-setup
 git pull
-.\Setup.bat -Dev
+.\Setup.bat
 .\Bootstrap-And-Capture.bat
 ```
 

@@ -29,16 +29,18 @@
 # subsequent runs replaces the existing block in-place.
 #
 # Usage:
-#   ./Setup.sh                 consumer mode — print install instructions, exit
-#   ./Setup.sh --dev           developer install — apply every engine patch
-#   ./Setup.sh --dev --dry-run check what would happen, no mutations
-#   ./Setup.sh --dev --force   skip the "already applied" idempotency probe
+#   ./Setup.sh                 apply every engine patch (idempotent)
+#   ./Setup.sh --dry-run       check what would happen, no mutations
+#   ./Setup.sh --force         skip the "already applied" idempotency probe
 #
-# Default (no flags) = consumer mode: tells the user to run
-# `package_install ghage.claude-sbox tools` in the editor console. No engine
-# touches, no clone. The contributor / source-tree workflow is opt-in via
-# --dev. --dry-run and --force imply --dev (only meaningful when applying
-# patches).
+# Same script runs for both cloud-install users (no source clone, addon
+# comes from sbox.game) and source-clone developers (addon source at
+# game/addons/claude-sbox/). Both paths need the engine patches applied —
+# the cloud-install path fails with whitelist errors at mount time without
+# patches 9/10/11, and patch 4 is what makes `package_install` auto-mount
+# on every project load. The script does NOT install the addon itself;
+# that's `package_install ghage.claude-sbox tools` in the editor console
+# (cloud) or `git clone` of the addon repo (source).
 #
 # Known limitation: re-running Setup.sh on a tree where patches are already
 # applied AND have stacked context shifts may end up fuzzy-applying some
@@ -56,14 +58,17 @@ set -uo pipefail
 
 DRY_RUN=0
 FORCE=0
-DEV=0
 for arg in "$@"; do
     case "$arg" in
-        --dev|-Dev)        DEV=1 ;;
         --dry-run|-DryRun) DRY_RUN=1 ;;
         --force|-Force)    FORCE=1 ;;
+        # --dev / -Dev are accepted as no-op aliases for backwards
+        # compatibility with scripts written against the old flag-gated
+        # design. Both audiences now run the same Setup, so the flag is
+        # redundant but harmless.
+        --dev|-Dev)        : ;;
         -h|--help)
-            sed -n '2,40p' "$0" | sed 's/^# \?//'
+            sed -n '2,16p' "$0" | sed 's/^# \?//'
             exit 0
             ;;
         *)
@@ -72,63 +77,6 @@ for arg in "$@"; do
             ;;
     esac
 done
-
-# --dry-run / --force are only meaningful when applying patches, so they
-# imply --dev. Without this a user passing only --dry-run would silently
-# fall into consumer mode and see the "exit immediately" path, which is
-# confusing — they clearly intended to preview the patch apply.
-if [ "$DRY_RUN" -eq 1 ] || [ "$FORCE" -eq 1 ]; then DEV=1; fi
-
-# ───────────────────────── Consumer-mode short-circuit ─────────────────────────
-# Default path. No engine touches, no clone, no managed .gitignore writes —
-# just print the one-line `package_install` flow that cloud installers use.
-# Exits 0 before any state is mutated.
-#
-# Why this is the default: most people running Setup.sh are end-users
-# looking for the install command, not contributors planning to edit addon
-# source. The contributor path is the explicit --dev opt-in; everyone else
-# gets a fast no-op + the editor-console command.
-#
-# Note: the consumer path assumes the engine has already been patched
-# (otherwise `package_install` will fail at compile/load time with
-# whitelist errors from patches 9/10). For a fresh sbox-public checkout
-# the user MUST run with --dev at least once to apply the patches, then
-# they can choose source-clone (continue with --dev) or cloud-install
-# (skip the source clone and use `package_install` in the editor).
-# Called out in the consumer banner below so users aren't surprised.
-if [ "$DEV" -eq 0 ]; then
-    # Reuse the color helpers defined later in the script. They're inline
-    # here so the consumer banner doesn't have to wait for sanity-check
-    # logic to run before printing.
-    if [ -t 1 ] && [ "${TERM:-dumb}" != "dumb" ]; then
-        _C_RESET=$'\e[0m'; _C_CYAN=$'\e[36m'; _C_YELLOW=$'\e[33m'; _C_GRAY=$'\e[90m'
-    else
-        _C_RESET=""; _C_CYAN=""; _C_YELLOW=""; _C_GRAY=""
-    fi
-    echo
-    echo "${_C_CYAN}==> claude-sbox setup (consumer mode)${_C_RESET}"
-    echo
-    echo "${_C_YELLOW}Install claude-sbox as a cloud package:${_C_RESET}"
-    echo "  1. Launch  <sbox-public>/game/sbox-dev  (any project)"
-    echo "  2. Open the developer console (~ key)"
-    echo "  3. Run:    package_install ghage.claude-sbox tools"
-    echo "  4. Restart the editor"
-    echo
-    echo "The in-editor MCP host comes up on  http://127.0.0.1:6790"
-    echo "Connect Claude Code:"
-    echo "  claude mcp add --transport http -s user sbox http://127.0.0.1:6790/mcp"
-    echo "  (or http://host.docker.internal:6790/mcp from a devcontainer)"
-    echo
-    echo "${_C_GRAY}Note: cloud install requires the claude-sbox engine patches to be${_C_RESET}"
-    echo "${_C_GRAY}applied on this sbox-public checkout. If your editor logs whitelist${_C_RESET}"
-    echo "${_C_GRAY}errors at compile/mount time, re-run with --dev to apply them:${_C_RESET}"
-    echo "${_C_GRAY}    ./Setup.sh --dev${_C_RESET}"
-    echo
-    echo "${_C_CYAN}For source-clone developer setup (edit addon code, contribute back),${_C_RESET}"
-    echo "${_C_CYAN}use:  ./Setup.sh --dev${_C_RESET}"
-    echo
-    exit 0
-fi
 
 # ───────────────────────── Locate sbox-public root ─────────────────────────
 # Script lives at <sbox-public-root>/game/addons/claude-sbox-setup/Setup.sh,
