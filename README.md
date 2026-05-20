@@ -109,18 +109,22 @@ Three independent moving parts: the engine (`sbox-public`), the setup tooling (t
 # 1. Close the editor if it's running — DLLs in game\bin\managed\ get
 #    file-locked by sbox-dev.exe and Bootstrap will fail.
 
-# 2. Verify your sbox-public working tree has no in-progress edits.
-cd <sbox-public>
-git status engine/
-#    Expected: "nothing to commit, working tree clean".
-#    If anything shows up, commit / stash / discard before continuing
-#    — Safe-Pull's auto-stash works for .gitignore but won't recover
-#    arbitrary engine-source mods you forgot about.
-
-#    To discard everything under engine/ unconditionally (reset both
-#    the index and the working tree to upstream HEAD, including any
-#    unmerged-conflict files):
-#        git checkout HEAD -- engine/
+# 2. (Optional) sanity-check that your state matches a healthy post-
+#    Setup tree before pulling.
+cd <sbox-public>\game\addons\claude-sbox-setup
+.\Safe-Pull.bat -DryRun
+#    Healthy output: "[OK] 7/7 tracked patches present" plus the
+#    incoming-commit count, then exits without pulling. If the
+#    verifier reports markers missing OR finds an unrelated tracked
+#    change in engine/, fix that BEFORE running Safe-Pull for real.
+#
+#    NOTE: a healthy post-Setup tree DOES have 6 modified files
+#    under engine/ — those are the applied patches and you want to
+#    keep them. The thing to watch out for is OTHER changes mixed
+#    in (e.g. you manually tweaked an engine source while debugging
+#    and forgot). DO NOT `git checkout HEAD -- engine/` to "clean
+#    up" before Safe-Pull — that wipes the patches Setup just
+#    applied, and you'll have to re-run Setup.bat to recover.
 ```
 
 #### Update tooling FIRST
