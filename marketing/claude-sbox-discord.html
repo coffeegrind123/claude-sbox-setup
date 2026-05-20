@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>claude-sbox · 800×600 discord</title>
+<!--
+  800×600 Discord card. 4:3 — narrower than the 1200×630 WAYWO so
+  the embed renders at a sensible size in chat. Content tier:
+    1. wordmark
+    2. one-sentence pitch
+    3. three-stat strip (tools / transports / port)
+    4. install command
+  No CLI usage flags, no decorative columns.
+
+  Render: chromium --headless --window-size=800,687 --screenshot=tmp.png
+          file:///path/to/claude-sbox-discord.html
+          (chromium reserves ~87px of window for hidden chrome)
+          crop top-left 800×600 from tmp.png.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..900,0..100,0..1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --paper:       #F4EEE3;
+    --paper-deep:  #ECE3D2;
+    --ink:         #1A1714;
+    --ink-soft:    #463E36;
+    --muted:       #8A7F70;
+    --rule:        rgba(26, 23, 20, 0.16);
+    --rule-soft:   rgba(26, 23, 20, 0.09);
+    --accent:      #C0512F;
+    --accent-deep: #9A3F22;
+    --forest:      #2F5B4F;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); }
+  body {
+    width: 800px;
+    height: 600px;
+    overflow: hidden;
+    font-family: 'Inter', sans-serif;
+    color: var(--ink);
+  }
+  @media (min-width: 900px) {
+    html, body { width: auto; height: auto; background: #2a2522; }
+    body { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .poster { box-shadow: 0 30px 80px rgba(0,0,0,0.4), 0 6px 16px rgba(0,0,0,0.2); }
+  }
+
+  .poster {
+    width: 800px;
+    height: 600px;
+    position: relative;
+    background:
+      radial-gradient(ellipse 85% 60% at 88% 12%, rgba(192,81,47,0.06), transparent 70%),
+      radial-gradient(ellipse 70% 55% at 10% 92%, rgba(47,91,79,0.045), transparent 70%),
+      var(--paper);
+    overflow: hidden;
+  }
+  .poster::before {
+    content: "";
+    position: absolute; inset: 0;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(26,23,20,0.013) 0 1px, transparent 1px 3px),
+      repeating-linear-gradient(90deg, rgba(26,23,20,0.011) 0 1px, transparent 1px 4px);
+    pointer-events: none;
+    mix-blend-mode: multiply;
+  }
+
+  .reg {
+    position: absolute;
+    width: 8px; height: 8px;
+    border: 1.4px solid var(--ink);
+    border-radius: 50%;
+  }
+  .reg::after {
+    content: ""; position: absolute;
+    top: 50%; left: -7px; right: -7px;
+    border-top: 1.4px solid var(--ink);
+  }
+  .reg::before {
+    content: ""; position: absolute;
+    left: 50%; top: -7px; bottom: -7px;
+    border-left: 1.4px solid var(--ink);
+  }
+  .reg.tl { top: 18px; left: 18px; }
+  .reg.tr { top: 18px; right: 18px; }
+  .reg.bl { bottom: 18px; left: 18px; }
+  .reg.br { bottom: 18px; right: 18px; }
+
+  .wm {
+    position: absolute;
+    bottom: -56px;
+    right: -22px;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 300;
+    font-size: 360px;
+    line-height: 1;
+    color: var(--ink);
+    opacity: 0.035;
+    pointer-events: none;
+    letter-spacing: -0.07em;
+  }
+
+  .frame {
+    position: absolute;
+    inset: 50px 56px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .eyebrow {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .eyebrow .left { display: flex; gap: 10px; align-items: center; }
+  .eyebrow .dot { width: 7px; height: 7px; background: var(--accent); border-radius: 50%; transform: translateY(-1px); }
+  .eyebrow .sep { color: var(--muted); }
+  .eyebrow .url {
+    font-size: 12px;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--ink);
+  }
+  .eyebrow .url .at { color: var(--accent); }
+
+  .rule {
+    height: 1px;
+    background: var(--rule);
+    margin-top: 11px;
+  }
+
+  h1 {
+    margin: 28px 0 0;
+    font-family: 'Fraunces', serif;
+    font-weight: 500;
+    font-variation-settings: "opsz" 144, "SOFT" 30, "WONK" 1;
+    font-size: 110px;
+    line-height: 0.88;
+    letter-spacing: -0.05em;
+    color: var(--ink);
+  }
+  h1 .amp {
+    color: var(--accent);
+    font-style: italic;
+    font-weight: 400;
+    font-variation-settings: "opsz" 144, "SOFT" 100, "WONK" 1;
+  }
+
+  .dek {
+    margin-top: 18px;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 350;
+    font-size: 22px;
+    line-height: 1.32;
+    color: var(--ink-soft);
+    max-width: 600px;
+  }
+  .dek .accent { color: var(--accent); font-style: normal; font-weight: 500; }
+
+  .stats {
+    margin-top: auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.4fr;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 16px 0 14px;
+  }
+  .stat { padding-right: 20px; position: relative; }
+  .stat + .stat { padding-left: 20px; }
+  .stat + .stat::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 4px; bottom: 4px;
+    width: 1px;
+    background: var(--rule-soft);
+  }
+  .stat .n {
+    font-family: 'Fraunces', serif;
+    font-weight: 400;
+    font-variation-settings: "opsz" 144;
+    font-size: 50px;
+    line-height: 1;
+    letter-spacing: -0.035em;
+    color: var(--ink);
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .stat .n .pre { font-size: 22px; color: var(--muted); transform: translateY(-10px); font-weight: 300; }
+  .stat.feature .n {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 26px;
+    font-weight: 500;
+    color: var(--accent-deep);
+    letter-spacing: -0.005em;
+  }
+  .stat .label {
+    margin-top: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .foot {
+    margin-top: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-soft);
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .foot .prompt { color: var(--accent); font-weight: 700; margin-right: 4px; }
+  .foot .key { color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+<main class="poster" role="img" aria-label="claude-sbox — Claude Code integration for the s&box editor. 593 MCP tools on localhost:6790.">
+
+  <span class="reg tl"></span>
+  <span class="reg tr"></span>
+  <span class="reg bl"></span>
+  <span class="reg br"></span>
+
+  <div class="wm">593</div>
+
+  <div class="frame">
+
+    <div class="eyebrow">
+      <div class="left">
+        <span class="dot"></span>
+        <span>Editor Tool · s&amp;box</span>
+      </div>
+      <div class="url">sbox.game<span class="at">/</span>ghage<span class="at">/</span>claude-sbox</div>
+    </div>
+    <div class="rule"></div>
+
+    <h1>claude<span class="amp">·</span>sbox</h1>
+
+    <p class="dek">
+      Deep <span class="accent">Claude Code</span> integration — ~593 MCP tools for the s&amp;box editor.<br>
+      If a human can click it, the agent can drive it.
+    </p>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="n"><span class="pre">~</span>593</div>
+        <div class="label">MCP Tools</div>
+      </div>
+      <div class="stat">
+        <div class="n">3</div>
+        <div class="label">Transports</div>
+      </div>
+      <div class="stat feature">
+        <div class="n">127.0.0.1<span style="color:var(--muted);font-weight:400">:</span>6790</div>
+        <div class="label">Localhost · One Port</div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <span class="prompt">&gt;</span><span class="key">package_install</span> ghage.claude-sbox tools
+    </div>
+
+  </div>
+
+</main>
+</body>
+</html>
