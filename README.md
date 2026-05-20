@@ -166,7 +166,7 @@ Copy-Item -Recurse skill "$HOME/.claude/skills/sbox-live"
 
 ### Engine patches: what gets applied
 
-Setup applies seven patches to your sbox-public tree (all reversible, all shipped in `patches/` for inspection):
+`Setup.bat -Dev` (Windows) / `./Setup.sh --dev` (Linux) applies seven patches to your sbox-public tree (all reversible, all shipped in `patches/` for inspection). Default `Setup` without `-Dev` / `--dev` is consumer-mode: prints the `package_install` reminder and exits without touching anything.
 
 1. **`Project.Static.cs`**: adds the addon to the engine's built-in addon list **if** a source clone is present at `game/addons/claude-sbox/`. Source-clone branch only; the sbox.game-install flow (the common case) gets auto-load from patch 4 instead.
 2. **`DownloadPublicArtifacts.cs`**: dedupes manifest entries by destination path. Fixes an upstream race where parallel artifact downloads fight over the same file when a manifest contains duplicate-path entries (causes confusing "being used by another process" failures during `Bootstrap.bat`).
@@ -316,7 +316,7 @@ cd game\addons\claude-sbox-setup
 .\Prepare-Bootstrap.bat -Yes   # non-interactive variant for scripts
 ```
 
-Pass `-Dry` to see what would be killed without touching anything. The script only stops well-known holder process names (sbox-dev, VBCSCompiler, MSBuild, csc, dotnet build-server); if a lock persists after running it, use Sysinternals `handle64.exe -nobanner <path>` against the specific DLL to find an unusual holder (Explorer window with `game\bin\managed` focused, an antivirus mid-scan, etc.).
+Pass `-Dry` to see what would be killed without touching anything. The script stops well-known holder process names (sbox-dev, VBCSCompiler, MSBuild, csc) and then issues `dotnet build-server shutdown` to release dotnet's persistent build server (which doesn't show up as a process to kill but can still hold DLL handles). If a lock persists after running it, use Sysinternals `handle64.exe -nobanner <path>` against the specific DLL to find an unusual holder (Explorer window with `game\bin\managed` focused, an antivirus mid-scan, etc.).
 
 ---
 
