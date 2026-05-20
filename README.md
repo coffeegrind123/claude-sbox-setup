@@ -99,23 +99,107 @@ Setup applies eleven patches to your sbox-public tree (all reversible, all shipp
 10. **`PackageLoader.cs`** (the second consumer-side whitelist gate, after patch 9): extends the "skip access control for tool assemblies" exemption to remote (cloud-mounted) tool packages. Patch 9 fixed the COMPILE-time whitelist; patch 10 fixes the DLL-LOAD-time whitelist that runs immediately after compile in `LoadAssemblyFromPackage`. Facepunch's original code gates the skip behind `ap.Package is LocalPackage` with a comment saying "This is used for tool packages which are ALWAYS local" — so cloud tool addons trip the check. Without this patch, the consumer's mount fails with hundreds of "Whitelist Error: X is not allowed when whitelist is enabled" PLUS "Couldn't resolve 'Microsoft.CodeAnalysis.CSharp / Facepunch.ActionGraphs / ...'" errors from `AccessControl.VerifyAssembly`'s metadata walker. Bypassing the whitelist via `TrustUnsafe` skips both. End-user-facing — pairs with patch 9 to make cloud-installed tool addons actually load.
 11. **`StartupLoadProject.cs`** (second insertion, just before patch 4's `InstallAsync` of claude-sbox): mounts `local.toolbase` first. The published `claude-sbox.dll` has a direct assembly reference on `package.toolbase` (baked in by patch 6's `AddToolBaseReference`). When the CLR runs the addon's static constructors via `RunAllStaticConstructors`, it asks the LoadContext to resolve `package.toolbase.dll` — which fails with `System.IO.FileNotFoundException` if toolbase isn't loaded yet. In the unpatched sequence, `local.toolbase` is mounted via `PackageManager.InstallProjects( IsBuiltIn )` further down in the same function — AFTER patch 4's auto-mount point. Without patch 11 the order is wrong and the addon throws even though patches 9 + 10 already cleared the whitelist. `InstallAsync` is idempotent so the later batch re-install is a no-op.
 
-### Updating sbox-public
+### Routine update procedure
 
-When you pull upstream sbox-public, the engine files revert to their pristine state. The easiest path is `.\Safe-Pull.bat` (also from this directory):
+Three independent moving parts: the engine (`sbox-public`), the setup tooling (this repo), and the addon itself (mounted via the editor's package system). Update them in this exact order so each step uses the freshest version of whatever it depends on.
+
+#### Pre-flight
 
 ```powershell
-cd game\addons\claude-sbox-setup
-.\Safe-Pull.bat
+# 1. Close the editor if it's running — DLLs in game\bin\managed\ get
+#    file-locked by sbox-dev.exe and Bootstrap will fail.
+
+# 2. Verify your sbox-public working tree has no in-progress edits.
+cd <sbox-public>
+git status engine/
+#    Expected: "nothing to commit, working tree clean".
+#    If anything shows up, commit / stash / discard before continuing
+#    — Safe-Pull's auto-stash works for .gitignore but won't recover
+#    arbitrary engine-source mods you forgot about.
 ```
 
-That snapshots your tracked-file edits and addon source (if you have one) to `.backups/<timestamp>/`, runs `git pull` on sbox-public, then re-applies the eleven engine patches in one pass and verifies their post-pull markers. If you'd rather do it by hand:
+#### Update tooling FIRST
 
 ```powershell
+# 3. Pull this repo. Safe-Pull.bat is what we're about to USE — if the
+#    script has been improved, we want the improved version. Also
+#    brings in any new engine patches added under patches/ since last
+#    time (new upstream changes occasionally need new patches).
+cd <sbox-public>\game\addons\claude-sbox-setup
+git pull
+```
+
+#### Pull engine + reapply patches
+
+```powershell
+# 4. Snapshot + pull sbox-public + re-apply every patch.
+.\Safe-Pull.bat
+#    Healthy output ends with "[OK] 7/7 tracked patches present" and
+#    "[OK] HEAD is now <sha>". Any "[XX] FAILED" line means a patch
+#    couldn't merge against the new upstream — Safe-Pull prints the
+#    exact .\Restore-From-Backup.bat command to roll back.
+```
+
+#### Rebuild engine DLLs
+
+```powershell
+# 5. Compile managed DLLs against the new commit. Slow step (5-15 min
+#    depending on whether NuGet caches are warm).
+.\Bootstrap-And-Capture.bat
+```
+
+#### Refresh the companion skill (when it's changed)
+
+```powershell
+# 6. Sync the bundled sbox-live skill source into Claude Code's
+#    user-scope skill directory. Skip when the skill/ tree didn't
+#    change in step 3, but it's idempotent so re-running is fine.
+$src = "<sbox-public>\game\addons\claude-sbox-setup\skill"
+$dst = "$env:USERPROFILE\.claude\skills\sbox-live"
+Copy-Item "$src\SKILL.md" "$dst\SKILL.md" -Force
+Copy-Item "$src\references\*" "$dst\references\" -Force -Recurse
+```
+
+#### Restart + verify
+
+```powershell
+# 7. Launch the editor. The claude-sbox addon auto-updates on package
+#    load — patch 0004 mounts the latest cached version from
+#    game\.sbox-global\cloud\.bin\ on every project load. The editor's
+#    package system polls sbox.game for newer published versions and
+#    refreshes the cache automatically, so this picks up addon
+#    updates without a manual `package_install` step.
+<sbox-public>\game\sbox-dev.exe
+
+# 8. From your Claude Code host (host shell, devcontainer, etc.):
+claude mcp list
+#    Look for "sbox    http://127.0.0.1:6790/mcp    Connected".
+```
+
+#### Failure recovery
+
+| Where it broke | What it usually means | What to do |
+|---|---|---|
+| Step 3 `git pull` refuses | Local changes in the setup repo | `git status`, commit / stash, then pull |
+| Step 4 — `Tracked patches missing or modified` pre-pull | `.gitignore` marker missing OR an engine file drifted | Re-run `.\Setup.bat` (writes the marker, idempotently re-applies patches) |
+| Step 4 — `X patch(es) failed to apply cleanly` post-pull | Upstream rewrote a line a patch depends on | Open the failing `.patch` file + the target side-by-side, hand-merge the hunk, run `.\Refresh-Patches.bat` to recapture, then `.\Setup.bat` to finish |
+| Step 4 leaves the engine in `Unmerged paths` state | 3-way merge produced conflict markers | `cd <sbox-public>; git checkout HEAD -- engine/` to reset, then `git stash pop` to restore `.gitignore`, then `.\Setup.bat` for a clean re-apply |
+| Step 4 partially completed and you want to roll back fully | Anything | `.\Restore-From-Backup.bat -Snapshot <timestamp> -Yes` (the timestamp is printed at the bottom of the failed Safe-Pull output) |
+| Step 5 `MSB3021 ... being used by another process` | Lingering sbox-dev / VBCSCompiler / dotnet build server | Re-run `.\Bootstrap-And-Capture.bat` (it has built-in lock-holder detection); or `.\Prepare-Bootstrap.bat -Yes` directly if you want to inspect first |
+| Step 7 editor launches but no addon | Package cache wiped or first-time install on this clone | Developer console → `package_install ghage.claude-sbox tools` |
+| Step 8 MCP server not connected | Port 6790 blocked, editor still booting, or addon failed to load | Check editor's Console dock for `[ClaudeSboxMcp]` log lines; verify port 6790 isn't taken (`netstat -ano \| findstr :6790`) |
+
+#### Manual variant (if you prefer to skip Safe-Pull)
+
+```powershell
+# Equivalent steps without the safety wrapper. Lose: automatic
+# snapshot, overlap-with-patches check, post-pull marker verification.
 cd <sbox-public>
 git pull
 cd game\addons\claude-sbox-setup
-git pull       # update setup repo itself
-.\Setup.bat    # re-apply engine patches (idempotent)
+git pull
+.\Setup.bat
+.\Bootstrap-And-Capture.bat
 ```
 
 Power users with their own multi-patch workflows can refer to `patches/*.patch` directly and integrate them into their own `git apply` flow.
