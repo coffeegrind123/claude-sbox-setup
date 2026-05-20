@@ -239,9 +239,46 @@ try {
     foreach ($p in $patches) {
         Write-Host "    $($p.Name)... " -NoNewline
 
+        # Build the CRLF-normalized variant of the patch up front so both
+        # the idempotency probe (below) and the forward-apply fallbacks
+        # can use it. The forward tiers used to create this on demand,
+        # but the asymmetry between forward (tiered with CRLF fallback)
+        # and reverse-check (single LF attempt) was exactly what broke
+        # Windows users with autocrlf=true: an already-applied patch
+        # failed the strict reverse-check on CRLF mismatch, fell through
+        # to the forward tiers, and let patch.exe's fuzzy matcher double-
+        # apply it — corrupting the working tree.
+        #
+        # [System.IO.Path]::GetTempPath() is more reliable than $env:TEMP —
+        # it falls back through the same chain (TMP, TEMP, USERPROFILE,
+        # then the Windows system temp). $env:TEMP can be empty under
+        # SYSTEM service contexts or freshly-spawned non-interactive
+        # shells.
+        $crlfPatch = Join-Path ([System.IO.Path]::GetTempPath()) ("claude-sbox-" + $p.BaseName + "-crlf.patch")
+        $content = [System.IO.File]::ReadAllText($p.FullName)
+        # First normalise any pre-existing CRLF back to LF so we don't
+        # produce mixed endings, then convert every LF to CRLF wholesale.
+        $content = $content.Replace("`r`n", "`n").Replace("`n", "`r`n")
+        [System.IO.File]::WriteAllText($crlfPatch, $content, [System.Text.UTF8Encoding]::new($false))
+
+        # Tiered idempotency probe — mirrors the forward tier escalation.
+        # If ANY of these four reverse-check variants returns exit 0, the
+        # patch is already applied and we can safely skip.
+        #
+        # The tiers parallel the forward tiers:
+        #   R1: strict           on LF patch
+        #   R2: --3way           on LF patch
+        #   R3: strict           on CRLF patch
+        #   R4: --3way           on CRLF patch
+        # PowerShell -or short-circuits, so later tiers only run if
+        # earlier ones miss.
         if (-not $Force) {
-            $r = Invoke-Git apply --check --reverse @applyFlags $p.FullName
-            if ($r.ExitCode -eq 0) {
+            $checkOk =
+                ((Invoke-Git apply --check --reverse @applyFlags $p.FullName).ExitCode -eq 0) -or
+                ((Invoke-Git apply --3way --check --reverse @applyFlags $p.FullName).ExitCode -eq 0) -or
+                ((Invoke-Git apply --check --reverse @applyFlags $crlfPatch).ExitCode -eq 0) -or
+                ((Invoke-Git apply --3way --check --reverse @applyFlags $crlfPatch).ExitCode -eq 0)
+            if ($checkOk) {
                 Write-Host "already applied" -ForegroundColor Yellow
                 $skippedCount++
                 continue
@@ -279,22 +316,11 @@ try {
             continue
         }
 
-        # Tier 3: rewrite the patch with CRLF endings to match Windows
-        # working-tree files (autocrlf=true converts LF->CRLF on checkout
-        # but the index stays LF, so an LF patch doesn't context-match the
-        # CRLF working tree and `does not match index` fires on --3way).
-        # [System.IO.Path]::GetTempPath() is more reliable than $env:TEMP — it
-        # falls back through the same chain (TMP, TEMP, USERPROFILE, then the
-        # Windows system temp) and always returns a valid path. $env:TEMP can
-        # be empty under SYSTEM service contexts or freshly-spawned non-
-        # interactive shells, in which case the Join-Path here used to produce
-        # "\claude-sbox-...-crlf.patch" rooted at the filesystem drive.
-        $crlfPatch = Join-Path ([System.IO.Path]::GetTempPath()) ("claude-sbox-" + $p.BaseName + "-crlf.patch")
-        $content = [System.IO.File]::ReadAllText($p.FullName)
-        # First normalise any pre-existing CRLF back to LF so we don't
-        # produce mixed endings, then convert every LF to CRLF wholesale.
-        $content = $content.Replace("`r`n", "`n").Replace("`n", "`r`n")
-        [System.IO.File]::WriteAllText($crlfPatch, $content, [System.Text.UTF8Encoding]::new($false))
+        # Tier 3: re-try with the CRLF-normalized patch variant we built
+        # at the top of the loop. Matches Windows working-tree files
+        # (autocrlf=true converts LF->CRLF on checkout but the index
+        # stays LF, so an LF patch doesn't context-match the CRLF working
+        # tree and `does not match index` fires on --3way).
         $rCRLF = Invoke-Git apply @applyFlags $crlfPatch
         if ($rCRLF.ExitCode -eq 0) {
             Write-Host "applied (crlf)" -ForegroundColor Green
