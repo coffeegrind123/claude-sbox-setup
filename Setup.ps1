@@ -261,23 +261,32 @@ try {
         $content = $content.Replace("`r`n", "`n").Replace("`n", "`r`n")
         [System.IO.File]::WriteAllText($crlfPatch, $content, [System.Text.UTF8Encoding]::new($false))
 
-        # Tiered idempotency probe — mirrors the forward tier escalation.
-        # If ANY of these four reverse-check variants returns exit 0, the
-        # patch is already applied and we can safely skip.
+        # Tiered idempotency probe — strict only, LF and CRLF variants.
         #
-        # The tiers parallel the forward tiers:
-        #   R1: strict           on LF patch
-        #   R2: --3way           on LF patch
-        #   R3: strict           on CRLF patch
-        #   R4: --3way           on CRLF patch
-        # PowerShell -or short-circuits, so later tiers only run if
-        # earlier ones miss.
+        # We deliberately do NOT use `--3way --check --reverse` here even
+        # though `--3way` is part of the forward apply tiers. The reason:
+        # `--3way` consults git's object database to find blobs matching
+        # the patch's expected pre- or post-state. For an idempotency
+        # check this is unsafe: if the patch was ever applied + committed
+        # somewhere in history (which is true for every patch in this
+        # repo — they're committed to claude-sbox-setup), `--3way
+        # --check --reverse` reports SUCCESS for a freshly-reverted file
+        # at HEAD, because the blob "HEAD plus patch" exists in some
+        # git object store. That's a false positive: Setup would skip
+        # the patch as "already applied" when in reality the file is
+        # clean and needs the patch applied fresh. The downstream effect
+        # is partial patch coverage — patches stacked on the same file
+        # (like 0005-0008 on Utility.Projects.Compile.cs) cascade-fail.
+        #
+        # Strict `--check --reverse` actually examines the working-tree
+        # file's context lines and only succeeds when they match the
+        # post-patch state. CRLF normalization on the patch file is the
+        # only legitimate variant — covers Windows checkouts where the
+        # working tree is CRLF but the LF patch can't context-match.
         if (-not $Force) {
             $checkOk =
                 ((Invoke-Git apply --check --reverse @applyFlags $p.FullName).ExitCode -eq 0) -or
-                ((Invoke-Git apply --3way --check --reverse @applyFlags $p.FullName).ExitCode -eq 0) -or
-                ((Invoke-Git apply --check --reverse @applyFlags $crlfPatch).ExitCode -eq 0) -or
-                ((Invoke-Git apply --3way --check --reverse @applyFlags $crlfPatch).ExitCode -eq 0)
+                ((Invoke-Git apply --check --reverse @applyFlags $crlfPatch).ExitCode -eq 0)
             if ($checkOk) {
                 Write-Host "already applied" -ForegroundColor Yellow
                 $skippedCount++
