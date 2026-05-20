@@ -39,41 +39,13 @@ The same script runs for both cloud-install users (no source clone, addon comes 
 What the script does **not** do, for either audience:
 
 - It does **not** rebuild the engine DLLs. Setup edits the engine `.cs` source files in place; the editor loads compiled `.dll`s from `game/bin/managed/`. After Setup runs you MUST run `Bootstrap-And-Capture.bat` / `./Bootstrap-And-Capture.sh` to recompile those DLLs against the patched source — otherwise the editor keeps loading the pre-patch DLLs and the patches have no effect.
-- It does **not** clone the addon source. If you want the source tree at `<sbox-public>/game/addons/claude-sbox/`, you `git clone` that yourself (see "Source-clone install" below). Patch 1 detects the clone and auto-mounts it as a built-in addon when present.
+- It does **not** clone the addon source. If you want the source tree at `<sbox-public>/game/addons/claude-sbox/`, you `git clone` that yourself (see the "Contributors only" step in the Install section below). Patch 1 detects the clone and auto-mounts it as a built-in addon when present.
 - It does **not** run `package_install`. The `.cll` and `.xml` for the cloud-published addon get downloaded inside the editor, not from a CLI. Setup tells you the exact command to paste into the editor console as part of its post-apply Next-Steps.
 - It does **not** modify any file under `game/addons/claude-sbox/` (cloud install never has this dir; source-clone install owns it and the script never touches it).
 
 So both audiences run the **same** `Setup.bat` + `Bootstrap-And-Capture.bat` sequence to patch and rebuild the engine. The difference between the two install paths is what happens **after** — cloud users open the editor console and run `package_install ghage.claude-sbox tools`; source-clone developers additionally `git clone` the addon source.
 
-### Cloud install (no source clone)
-
-**Prerequisite**: the engine source must be patched **and recompiled into managed DLLs**. From `<sbox-public>/game/addons/claude-sbox-setup/`:
-
-```powershell
-# Windows
-.\Setup.bat
-.\Bootstrap-And-Capture.bat
-
-# Linux
-./Setup.sh
-./Bootstrap-And-Capture.sh
-```
-
-`Setup` modifies the engine `.cs` files. The editor loads compiled `.dll`s out of `<sbox-public>/game/bin/managed/`, so the source changes don't take effect until those DLLs are rebuilt — that's what `Bootstrap-And-Capture` does (wraps upstream's `Bootstrap.bat` / `bash bootstrap` with file-lock detection so MSBuild doesn't hit `MSB3021: ... being used by another process` from lingering sbox-dev / VBCSCompiler / dotnet build server). Slow first time (~5–15 min depending on NuGet cache state); fast incremental rebuilds afterward.
-
-Both steps are idempotent. Skip if you cloned a pre-patched, pre-built sbox-public fork; re-run both after every `git pull` on sbox-public.
-
-Then open `sbox-dev` (Windows: `sbox-dev.exe`; Linux: via Anvil's launcher), pull up the developer console, and run **once, ever**:
-
-```
-package_install ghage.claude-sbox tools
-```
-
-Restart the editor. The in-editor MCP host comes up on `http://127.0.0.1:6790`. Done.
-
-### Source-clone install — Windows
-
-This path includes everything the cloud install gets, plus a working tree of the addon source you can edit, hot-reload, and contribute back.
+### Install — Windows
 
 You need a working [sbox-public](https://github.com/Facepunch/sbox-public) checkout (`git clone --recursive https://github.com/Facepunch/sbox-public`).
 
@@ -84,16 +56,17 @@ cd <sbox-public>/game/addons/
 git clone https://github.com/coffeegrind123/claude-sbox-setup.git
 ```
 
-**2. From the new `claude-sbox-setup/` directory, apply the engine patches and rebuild:**
+**2. Apply engine patches + rebuild managed DLLs:**
 
 ```powershell
+cd claude-sbox-setup
 .\Setup.bat
 .\Bootstrap-And-Capture.bat
 ```
 
-`Setup.bat` applies the engine patches to the parent sbox-public tree and verifies them; idempotent — re-run after any `git pull` on sbox-public. Both install paths (cloud and source-clone) need this step because patches 9 / 10 / 11 fix the cloud-mount whitelist gates that block `package_install`. `Bootstrap-And-Capture.bat` is a wrapper around upstream's `Bootstrap.bat` that detects and stops any process holding `game/bin/managed/*.dll` open (lingering sbox-dev, VBCSCompiler, MSBuild, the dotnet build server, etc.) before the managed-DLL rebuild starts, so you don't hit the `MSB3021: ...being used by another process` cascade.
+`Setup.bat` edits the engine `.cs` files; `Bootstrap-And-Capture.bat` recompiles `game/bin/managed/*.dll` against the patched source (wraps upstream `Bootstrap.bat` with file-lock detection so MSBuild doesn't hit `MSB3021: ... being used by another process` from lingering sbox-dev / VBCSCompiler / dotnet build server). Both idempotent — re-run after every `git pull` on sbox-public. First Bootstrap is slow (~5–15 min depending on NuGet cache); incremental rebuilds afterward are fast.
 
-**3. Launch the editor and seed the addon:**
+**3. Launch the editor and install the addon:**
 
 ```powershell
 ..\..\sbox-dev.exe
@@ -105,13 +78,20 @@ Open any project (a fresh `my_project` is fine), open the developer console, and
 package_install ghage.claude-sbox tools
 ```
 
-That's the one-time install step. Patch 0004 (the cloud auto-mount) snapshots the downloaded package files into `<sbox-public>/game/.sbox-global/cloud/.bin/`. From here on, every editor restart on every project automatically copies that global snapshot back into the per-project cache before mounting — no redownload, works offline.
+Restart the editor. Patch 0004 (the cloud auto-mount) snapshots the downloaded package into `<sbox-public>/game/.sbox-global/cloud/.bin/` and auto-mounts it on every subsequent project load — no redownload, works offline. The in-editor MCP host comes up on `http://127.0.0.1:6790`.
 
-The in-editor MCP host comes up automatically on `http://127.0.0.1:6790`.
+**4. (Contributors only) clone the addon source:**
 
-### Source-clone install — Linux
+Skip this step if you just want to use the addon. Do it if you want to edit addon code, debug with the source visible, or contribute back.
 
-This path includes everything the cloud install gets, plus a working tree of the addon source you can edit, hot-reload, and contribute back.
+```sh
+cd <sbox-public>/game/addons/
+git clone https://github.com/coffeegrind123/claude-sbox.git
+```
+
+Patch 0001 detects `game/addons/claude-sbox/` and auto-mounts it as a built-in addon. The source clone takes precedence over the cloud version when both are present, so the editor loads your local edits. To fall back to the cloud version, delete the `game/addons/claude-sbox/` dir.
+
+### Install — Linux
 
 You need the joshuascript Linux fork of sbox-public, plus `gcc` (for compiling Anvil's native patches), `python3` (for crash analysis tools), and the .NET 10 SDK.
 
@@ -130,7 +110,7 @@ bash bootstrap
 
 When it prompts `Build managed artifacts now? [y/N]`, answer **y**.
 
-**3. Clone this setup repo and apply the engine patches:**
+**3. Clone this setup repo, apply engine patches, rebuild managed DLLs:**
 
 ```sh
 cd game/addons/
@@ -140,7 +120,7 @@ cd claude-sbox-setup
 ./Bootstrap-And-Capture.sh
 ```
 
-`Setup.sh` applies the same 7 engine patches the Windows path uses (cross-platform `git diff` files, no `.bat`-specific content). Idempotent — re-run after any `git pull` on sbox-public. `Bootstrap-And-Capture.sh` wraps the fork's `bash bootstrap` script with file-lock detection (via `lsof +D`, rare on Linux) and log capture.
+`Setup.sh` applies the same 7 engine patches the Windows path uses (cross-platform `git diff` files). Idempotent — re-run after every `git pull` on sbox-public. `Bootstrap-And-Capture.sh` wraps the fork's `bash bootstrap` script with file-lock detection (via `lsof +D`, rare on Linux) and log capture.
 
 **4. Launch the editor via Anvil's wrapper (NOT the `sbox-dev` binary directly — Anvil sets up the LD_PRELOAD chain):**
 
@@ -155,6 +135,17 @@ package_install ghage.claude-sbox tools
 ```
 
 The in-editor MCP host comes up on `http://127.0.0.1:6790` — same as Windows.
+
+**5. (Contributors only) clone the addon source:**
+
+Skip this step if you just want to use the addon.
+
+```sh
+cd <sbox-public>/game/addons/
+git clone https://github.com/coffeegrind123/claude-sbox.git
+```
+
+Same semantics as Windows step 4 — patch 0001 detects the clone, source takes precedence over the cloud version, delete the dir to fall back.
 
 #### What's different on Linux
 
