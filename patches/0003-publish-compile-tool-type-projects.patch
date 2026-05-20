@@ -1,8 +1,76 @@
+warning: in the working copy of 'engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs', LF will be replaced by CRLF the next time Git touches it
 diff --git a/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs b/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
-index 62fefd21..3c428cfb 100644
+index 62fefd21..61468d6f 100644
 --- a/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
 +++ b/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
-@@ -108,6 +108,25 @@ public static partial class EditorUtility
+@@ -25,7 +25,65 @@ public static partial class EditorUtility
+ 			using CompileGroup compileGroup = new CompileGroup( "Publish" );
+ 			compileGroup.AccessControl = PackageManager.AccessControl;
+ 
+-			compilerSettings.IgnoreFolders.Add( "editor" );
++			// claude-sbox -- local engine modification. Skip the publish AccessControl
++			// whitelist for tool-type projects. The whitelist exists to restrict
++			// sandboxed game/library addons to a curated API surface (no Process,
++			// File I/O, HttpClient, raw editor types, etc.) -- correct for runtime-
++			// distributed content packages where end users may install untrusted
++			// code, but actively wrong for tool addons whose entire purpose is to
++			// extend the editor itself. The in-editor compile path (Project
++			// .Compiling.cs) doesn't apply this whitelist for ANY project type,
++			// which is why this addon (and any other tool addon) runs fine locally;
++			// the publish path here was the only place applying it. Result before
++			// this patch: ~700 "is not allowed when whitelist is enabled" errors
++			// per publish, against APIs the addon legitimately uses (PTY terminal
++			// via Process, FileSystem.Data via System.IO.File, HTTP MCP server via
++			// HttpListener / HttpClient, editor introspection via reflection, all
++			// the Editor.* widget types, ...).
++			//
++			// The published .cll content is identical to what the in-editor compile
++			// produces, just packaged for cloud distribution; loosening the publish
++			// whitelist for tools just brings parity with what the local compile
++			// already allows. Game/library publishes still get the standard
++			// whitelist enforcement.
++			if ( project.Config.Type == "tool" )
++			{
++				compileGroup.AccessControl = null;
++			}
++
++			// claude-sbox -- local engine modification. Give the publish CompileGroup
++			// a ReferenceProvider so cross-package references like `package.toolbase`
++			// can resolve via PackageManager.ActivePackages. In the in-editor compile
++			// path, each ActivePackage assigns itself as ReferenceProvider on its own
++			// CompileGroup (PackageManager.ActivePackage.cs:229); the publish path
++			// here builds a fresh CompileGroup without that wiring, so when
++			// AddToolBaseReference() (added by patch 6 for tool addons) tries to
++			// resolve "package.toolbase" the lookup fails with "Couldn't find
++			// reference package.toolbase" and the compile errors out.
++			//
++			// ActivePackage's Lookup walks every loaded ActivePackage's AssemblyFileSystem
++			// looking for a matching .dll, so any ActivePackage we hand to the group
++			// works as the lookup root -- they all share the same global ActivePackages
++			// HashSet. FirstOrDefault is fine because the lookup logic is identical
++			// across instances.
++			compileGroup.ReferenceProvider = PackageManager.ActivePackages.FirstOrDefault();
++
++			// claude-sbox -- local engine modification. The unconditional
++			// "editor" ignore is correct for game/library addons (Code/Editor/
++			// holds editor-only inspectors/tool windows that should NOT ship to
++			// players), but actively wrong for tool-type addons: a tool addon is
++			// ENTIRELY editor code, by definition, and almost always organises
++			// its source under Code/Editor/<...> matching its
++			// "Editor.<Namespace>" root. Adding "editor" to IgnoreFolders for
++			// tool publishes silently strips the whole codebase, packs only
++			// Code/Imports.cs into the .cll, and produces an empty (~1KB)
++			// package that mounts with no [Event] handlers and no behaviour.
++			// Gate the strip on project type so game/library publish behaviour
++			// is unchanged.
++			if ( project.Config.Type != "tool" )
++			{
++				compilerSettings.IgnoreFolders.Add( "editor" );
++			}
+ 			compilerSettings.IgnoreFolders.Add( "unittest" );
+ 			compilerSettings.ReleaseMode = Compiler.ReleaseMode.Release;
+ 			compilerSettings.StripDisabledTextTrivia = true;
+@@ -108,6 +166,55 @@ public static partial class EditorUtility
  			compiler.GeneratedCode.AppendLine( "global using Microsoft.AspNetCore.Components;" );
  			compiler.GeneratedCode.AppendLine( "global using Microsoft.AspNetCore.Components.Rendering;" );
  
@@ -18,6 +86,36 @@ index 62fefd21..3c428cfb 100644
 +			if ( project.Config.Type == "tool" )
 +			{
 +				compiler.GeneratedCode.AppendLine( "global using static Sandbox.Internal.GlobalToolsNamespace;" );
++
++				// claude-sbox -- local engine modification. Mirror the explicit
++				// assembly references the in-editor compile path adds for tool-
++				// type projects (engine/Sandbox.Engine/Systems/Project/Project/
++				// Project.Compiling.cs:109-122). Without these the publish-compile
++				// can't resolve Sandbox.Compiler, Microsoft.CodeAnalysis(.CSharp),
++				// Facepunch.ActionGraphs, SkiaSharp, etc. -- all assemblies that
++				// real tool addons routinely use. The in-editor compile works
++				// because it adds them; the publish-compile didn't, so tool
++				// publishes failed with hundreds of "type or namespace not found"
++				// errors. Plus AddToolBaseReference for everything except the
++				// toolbase project itself, so Editor.TreeView / AssetBrowser /
++				// ToastWidget / etc. resolve.
++				compiler.AddReference( "Sandbox.Tools" );
++				compiler.AddReference( "Sandbox.Compiling" );
++				compiler.AddReference( "System.Diagnostics.Process" );
++				compiler.AddReference( "System.Net.WebSockets" );
++				compiler.AddReference( "System.Net.WebSockets.Client" );
++				compiler.AddReference( "Microsoft.Win32.Registry" );
++				compiler.AddReference( "System.Memory" );
++				compiler.AddReference( "Sandbox.Bind" );
++				compiler.AddReference( "Facepunch.ActionGraphs" );
++				compiler.AddReference( "SkiaSharp" );
++				compiler.AddReference( "Microsoft.CodeAnalysis" );
++				compiler.AddReference( "Microsoft.CodeAnalysis.CSharp" );
++
++				if ( project.Package.CompilerName != "toolbase" )
++				{
++					compiler.AddToolBaseReference();
++				}
 +			}
 +
 +			foreach ( var reference in compilerSettings.DistinctAssemblyReferences )

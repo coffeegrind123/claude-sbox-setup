@@ -4,7 +4,7 @@
     Apply claude-sbox's engine patches to a sbox-public checkout.
 
 .DESCRIPTION
-    claude-sbox depends on eleven small engine modifications to behave
+    claude-sbox depends on seven small engine modifications to behave
     correctly:
 
       1. engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs
@@ -130,7 +130,7 @@
           PackageManager.InstallAsync is idempotent so the later
           InstallProjects re-install of toolbase becomes a no-op.
 
-    This script applies all eleven patches to the parent sbox-public checkout.
+    This script applies all seven patches to the parent sbox-public checkout.
     It is idempotent: re-running on a checkout where the patches are already
     applied is a no-op.
 

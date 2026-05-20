@@ -221,12 +221,12 @@ if ! git pull --ff-only origin master 2>&1 | sed 's/^/    /'; then
 fi
 
 # Apply every patch on disk in numeric-prefix order. The order matters —
-# patches 0005-0008 stack on the file 0003 modifies, so 0003 must land first.
+# patch 0011 stacks on the file 0004 modifies, so 0004 must land first.
 #
 # Apply strategy: strict first, --3way only as fallback. The earlier version
 # used --3way unconditionally, which fails for stacked patches (0005-0008):
-# their "before" blob hash refers to HEAD+0003 state which isn't a git-
-# tracked blob, so --3way can't find it and produces conflict markers on
+# their "before" blob hash refers to an intermediate (post-prior-patch) state
+# that isn't a git-tracked blob, so --3way can't find it and produces conflict markers on
 # what would be a clean strict apply against the already-0003-patched
 # working tree.
 step "Re-applying engine patches from patches/ on disk"

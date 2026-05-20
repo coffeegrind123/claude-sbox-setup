@@ -9,7 +9,7 @@
     The repo holds two kinds of in-progress work that a careless `git pull`
     or destructive command could nuke:
         1. Engine files modified by the claude-sbox patches — six files
-           total covered by eleven .patch files under
+           total covered by seven .patch files under
            `claude-sbox-setup/patches/`. The authoritative list is the
            `$expectedPatches` hashtable below; new patches must be added
            there. Note that patches 0005-0008 (Utility.Projects.Compile.cs
@@ -344,7 +344,7 @@ if ($DryRun) {
 #   - git apply --3way for EVERY patch in patches/*.patch (in numeric
 #     order — patches 0005-0008 stack on 0003's file, so the apply
 #     sequence is significant). Re-introduces engine modifications across
-#     all 11 patches, not just the regeneratable 3.
+#     all 7 patches, not just the regeneratable 3.
 #   - git stash pop to re-introduce .gitignore.
 #
 # `git apply --3way` is the win here: it knows each patch's original parent
@@ -425,7 +425,7 @@ if ($pullExit -ne 0) {
 }
 
 # Apply every patch on disk, not just the ones we refreshed. Numeric-prefix
-# sort matters: patches 0005-0008 stack on the file 0003 already modified,
+# sort matters: patch 0011 stacks on the file 0004 modifies,
 # so 0003 must land first. Get-ChildItem + Sort-Object Name gives us that
 # ordering for free as long as the .patch filenames keep their NNNN- prefix.
 #

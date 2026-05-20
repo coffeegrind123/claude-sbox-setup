@@ -1,5 +1,6 @@
+warning: in the working copy of 'engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs', LF will be replaced by CRLF the next time Git touches it
 diff --git a/engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs b/engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs
-index da59ac67..d648c0c3 100644
+index da59ac67..703bd027 100644
 --- a/engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs
 +++ b/engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs
 @@ -97,7 +97,34 @@ internal class DownloadPublicArtifacts( string name, bool nativeBinariesOnly = f
@@ -11,7 +12,7 @@ index da59ac67..d648c0c3 100644
 +		// entries pointing at the same `entry.Path` with different `entry.Sha256`
 +		// values (a CDN/build-pipeline race). Without dedupe, parallel.ForEach
 +		// fans out to threads that all open the same destination with
-+		// FileShare.None at line 269 ╬ô├ç├╢ they race each other, the loser logs
++		// FileShare.None at line 269 Γò¼├┤Γö£├ºΓö£Γòó they race each other, the loser logs
 +		// "being used by another process", and procmon shows only SboxBuild
 +		// because it is literally fighting itself. Take the first occurrence
 +		// per path; warn so the upstream defect is visible.
