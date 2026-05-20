@@ -19,14 +19,14 @@
       - Safe-Pull.ps1 stashes any remaining `.gitignore` mods across pulls.
     So no per-pull regen is needed for it.
 
-    `$patchedFiles` doesn't cover every patch on disk — patches 0005-0008
-    (Utility.Projects.Compile.cs multi-block) and 0011 (StartupLoadProject.cs
-    second block) are hand-maintained because we can't regenerate multiple
-    patches against the same working-tree file from a single ordered map.
-    They live under `patches/` directly; edit them in place if their content
-    needs to change. The self-test at the bottom of this script runs
-    `git apply --check` against EVERY .patch in the dir, so hand-maintained
-    ones still get verified.
+    `$patchedFiles` doesn't cover every patch on disk — patch 0011
+    (StartupLoadProject.cs second block) is hand-maintained because
+    Refresh-Patches can't regen multiple patches against the same
+    working-tree file from a single ordered map. 0011 lives under
+    `patches/` directly; edit it in place if its content needs to
+    change. The self-test at the bottom of this script runs
+    `git apply --check` against EVERY .patch in the dir, so hand-
+    maintained ones still get verified.
 
     Adding a new engine modification:
       1. Edit the engine file as usual.

@@ -12,10 +12,9 @@
            total covered by seven .patch files under
            `claude-sbox-setup/patches/`. The authoritative list is the
            `$expectedPatches` hashtable below; new patches must be added
-           there. Note that patches 0005-0008 (Utility.Projects.Compile.cs
-           multi-block) and 0011 (StartupLoadProject.cs second block)
-           stack additional modifications on files patches 0003 / 0004
-           already touch.
+           there. Note that patch 0011 (StartupLoadProject.cs second
+           block) stacks an additional modification on the file patch
+           0004 already touches.
         2. Untracked work that lives outside any tracked file — the
            claude-sbox addon source if you have it under
            `game/addons/claude-sbox/`, plus any local `.mcp.json` or
