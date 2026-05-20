@@ -185,10 +185,61 @@ fi
 # Engine files that any patch touches. Derived from $EXPECTED_PATCHES minus
 # the .gitignore key. We reset all of these to HEAD so the pull has a clean
 # tree for those paths, then re-apply every patch in patches/ in numeric
-# order (0005-0008 stack on 0003's file; 0011 stacks on 0004's file).
+# order (patch 0011 stacks on the StartupLoadProject.cs file 0004 modifies,
+# so 0004 must land first).
 PATCHED_ENGINE_FILES=()
 for f in "${!EXPECTED_PATCHES[@]}"; do
     [ "$f" != ".gitignore" ] && PATCHED_ENGINE_FILES+=("$f")
+done
+
+# Regenerable patches — file path → patch filename. Same set Refresh-Patches.sh
+# regenerates. Hand-maintained patch 0011 (StartupLoadProject.cs second
+# block) isn't in here; it lives in patches/ on disk and survives Safe-Pull
+# untouched.
+declare -A ENGINE_PATCHES=(
+    ["engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs"]="$SETUP_DIR/patches/0001-engine-add-claude-sbox-to-builtin-addons.patch"
+    ["engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs"]="$SETUP_DIR/patches/0002-sboxbuild-dedupe-manifest-paths.patch"
+    ["engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs"]="$SETUP_DIR/patches/0003-publish-compile-tool-type-projects.patch"
+)
+
+# Refresh patches/* from the current working-tree state BEFORE we revert
+# the engine files. If the user has uncommitted edits to a patched engine
+# file (typical workflow: edit Project.Static.cs, see if it compiles, then
+# Safe-Pull to take the latest upstream), those edits would otherwise be
+# silently destroyed by the upcoming `git checkout HEAD -- <file>`. The
+# snapshot taken above still has them, but recovery would be manual.
+# Capturing into patches/*.patch first means the subsequent re-apply at
+# the end of this script restores the user's working state transparently.
+#
+# Mirrors Safe-Pull.ps1's $enginePatches refresh loop. Hand-maintained
+# patches that share a working-tree file with a regeneratable patch
+# (currently just 0011 on StartupLoadProject.cs) aren't refreshed here —
+# we can't regen multiple patches against the same file from one map.
+# That's why the hand-maintained set lives in patches/ on disk and is
+# edited there directly.
+step "Refreshing patches/* from current working-tree state"
+for source_path in "${!ENGINE_PATCHES[@]}"; do
+    patch_path="${ENGINE_PATCHES[$source_path]}"
+    if [ ! -f "$source_path" ]; then
+        warn "$source_path doesn't exist — skipping"
+        continue
+    fi
+    # Route git diff through 2>/dev/null so autocrlf warnings ("LF will be
+    # replaced by CRLF") don't get prepended to the patch content. Without
+    # this the warning becomes the first line of the .patch file and the
+    # subsequent `git apply` sees a malformed leading line.
+    diff_out="$(git diff -- "$source_path" 2>/dev/null)"
+    if [ -z "$(echo "$diff_out" | tr -d '[:space:]')" ]; then
+        # File matches HEAD; no patch needed for this pull cycle. Leave any
+        # existing patch alone — the user may have intentionally reverted
+        # but kept the .patch file for reference.
+        ok "$source_path has no local mods (no patch needed for this pull)"
+        continue
+    fi
+    mkdir -p "$(dirname "$patch_path")"
+    printf '%s\n' "$diff_out" > "$patch_path"
+    bytes="$(stat -c%s "$patch_path" 2>/dev/null || wc -c < "$patch_path")"
+    ok "wrote $patch_path ($bytes bytes)"
 done
 
 step "Reverting patched engine files to HEAD (clean state for pull)"
@@ -224,11 +275,11 @@ fi
 # patch 0011 stacks on the file 0004 modifies, so 0004 must land first.
 #
 # Apply strategy: strict first, --3way only as fallback. The earlier version
-# used --3way unconditionally, which fails for stacked patches (0005-0008):
-# their "before" blob hash refers to an intermediate (post-prior-patch) state
-# that isn't a git-tracked blob, so --3way can't find it and produces conflict markers on
-# what would be a clean strict apply against the already-0003-patched
-# working tree.
+# used --3way unconditionally, which fails for stacked patches (e.g. patch
+# 0011 against StartupLoadProject.cs): their "before" blob hash refers to
+# an intermediate (post-prior-patch) state that isn't a git-tracked blob,
+# so --3way can't find it and produces conflict markers on what would be
+# a clean strict apply against the already-0004-patched working tree.
 step "Re-applying engine patches from patches/ on disk"
 PATCHES_DIR="$SETUP_DIR/patches"
 mapfile -t ALL_PATCHES < <(find "$PATCHES_DIR" -maxdepth 1 -name "*.patch" -type f | sort)

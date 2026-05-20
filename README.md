@@ -324,11 +324,11 @@ Pass `-Dry` to see what would be killed without touching anything. The script on
 
 ### 1. Dock widget
 
-A docked terminal panel next to the Console / Asset Browser, hosting a real interactive PTY session via Win32 ConPTY. Defaults to spawning `cmd.exe`: you type whatever lands you in your environment (typically `docker exec -it <your-container> bash`, then `claude`). Minimal ANSI→HTML stripping is applied so Claude Code's TUI renders readable; full xterm.js-grade rendering is the v1.5 polish target.
+A docked terminal panel next to the Console / Asset Browser, hosting a real interactive PTY session. The backend is cross-platform — `IPty` factory picks `ConPtyBackend` on Windows (Win32 ConPTY) and `UnixPtyBackend` on Linux (libutil `forkpty(3)`). Default shell is `cmd.exe` on Windows, `bash` on Linux: you type whatever lands you in your environment (typically `docker exec -it <your-container> bash`, then `claude`). Rendering uses an xterm.js-grade grid renderer with full ANSI/cursor support so Claude Code's TUI displays correctly.
 
 ### 2. In-editor MCP server on `127.0.0.1:6790`
 
-Exposes editor introspection + control as ~593 MCP tools. Localhost-only `HttpListener` hosting **three transports concurrently on the same port**:
+Exposes editor introspection + control as ~597 MCP tools. Localhost-only `HttpListener` hosting **three transports concurrently on the same port**:
 
 - `POST /<toolname>`: bespoke wire shape that the external Node `sbox-mcp-bridge` translates stdio-MCP into. Original transport; lower-friction when the bridge is in use.
 - `POST /mcp`: MCP JSON-RPC 2.0 Streamable HTTP. Lets clients connect directly without the bridge: `claude mcp add --transport http -s user sbox http://localhost:6790/mcp`.
@@ -366,7 +366,7 @@ This setup ships **no** Docker infrastructure. You bring your own container with
    ```
 
 5. Open the s&box editor. The "claude-sbox" tab appears in the bottom dock.
-6. Click it. A `cmd.exe` prompt appears in the widget.
+6. Click it. A shell prompt appears in the widget (`cmd.exe` on Windows, `bash` on Linux).
 7. Type your `docker exec -it <your-container> bash` (or whatever drops you into your environment), then `claude`.
 8. Claude Code reads `.mcp.json`, the bridge connects to the editor on `host.docker.internal:6790`, and the editor logs `[claude-sbox] sbox-mcp-bridge connected`.
 
@@ -378,7 +378,7 @@ If the bridge can't reach the editor, Claude Code still works: it just doesn't h
 
 ## MCP tool catalog
 
-The canonical, always-current inventory of tools (with arg shapes and example call patterns) ships in this repo at [`skill/references/mcp-tools.md`](skill/references/mcp-tools.md). ~593 tools across these categories:
+The canonical, always-current inventory of tools (with arg shapes and example call patterns) ships in this repo at [`skill/references/mcp-tools.md`](skill/references/mcp-tools.md). ~597 tools across these categories:
 
 - **Schema + docs** (live): `schema_*` + `docs_*`. API schema generated locally from the editor's loaded assemblies; prose docs pulled from `Facepunch/sbox-docs` (CC-BY-4.0).
 - **Reflection + introspection**: `reflection_*` family (find types/methods by attribute, walk type hierarchies, parse attribute metadata, enum value enumeration).
@@ -477,4 +477,4 @@ s&box doc page bodies surfaced through `docs_get` are CC-BY-4.0: sourced from `F
 
 ## Status
 
-In active development. Architecture is feature-complete against the principle stated at the top: auto-gen handles `[Menu]`/`[Shortcut]`/`[ConCmd]`/`[Editor.Tool]` automatically, explicit handlers cover the surfaces that aren't attribute-tagged. v1.5 polish targets: full xterm.js-grade rendering in the dock widget, connection-state UI (NoticeWidget + viewport overlay), and richer NodeGraph/ShaderGraph mutation if there's demand.
+In active development. Architecture is feature-complete against the principle stated at the top: auto-gen handles `[Menu]`/`[Shortcut]`/`[ConCmd]`/`[Editor.Tool]` automatically, explicit handlers cover the surfaces that aren't attribute-tagged. Cross-platform PTY (Windows ConPTY + Linux libutil `forkpty`) and xterm.js-grade grid renderer are in. Open polish targets: connection-state UI (NoticeWidget + viewport overlay), and richer NodeGraph/ShaderGraph mutation if there's demand.

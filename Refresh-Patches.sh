@@ -6,10 +6,11 @@
 # files we maintain local modifications for. Auto-snapshots before
 # regenerating so a careless run doesn't lose hand-tuned patch content.
 #
-# Same parity as the .ps1: patches 0005-0008 (Utility.Projects.Compile.cs
-# multi-block) and 0011 (StartupLoadProject.cs second block) are hand-
-# maintained because we can't regen multiple patches against the same
-# working-tree file from a single ordered map.
+# Same parity as the .ps1: patch 0011 (StartupLoadProject.cs second block)
+# is hand-maintained because we can't regen multiple patches against the
+# same working-tree file from a single ordered map. (The historical
+# 0005-0008 stack on Utility.Projects.Compile.cs was consolidated into
+# 0003, so only 0011 remains in the hand-maintained set today.)
 #
 # Self-test at the end runs `git apply --check` against EVERY .patch in
 # patches/ — covers both regenerated AND hand-maintained patches.
@@ -27,9 +28,9 @@ C_RESET=$'\e[0m'; C_CYAN=$'\e[36m'; C_GREEN=$'\e[32m'; C_YELLOW=$'\e[33m'; C_RED
 
 cd "$SBOX_ROOT" || { echo "cannot cd to $SBOX_ROOT" >&2; exit 1; }
 
-# Regenerable patches — file path → patch filename. Hand-maintained patches
-# (0005-0008, 0011) don't appear here; their files are still stashed by the
-# self-test loop below (via union with $PATCHES) but never regenerated.
+# Regenerable patches — file path → patch filename. Hand-maintained patch
+# 0011 doesn't appear here; its file is still stashed by the self-test
+# loop below (via union with $PATCHES) but never regenerated.
 declare -a PATCHED_FILES_KEYS=(
     "engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs"
     "engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs"

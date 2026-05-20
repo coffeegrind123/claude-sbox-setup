@@ -44,7 +44,7 @@
 # applied AND have stacked context shifts may end up fuzzy-applying some
 # patches at incorrect offsets (the GNU patch fuzzy matcher can find a
 # different chunk that fuzzy-matches the patch's context, even with -N).
-# The fresh-install path (clean engine tree → 11 strict applies) and the
+# The fresh-install path (clean engine tree → 7 strict applies) and the
 # Safe-Pull-driven update flow (reset → pull → re-apply) both avoid this.
 # Recovery if you suspect a double-apply: `git checkout HEAD -- engine/`
 # from the sbox-public root, then re-run ./Setup.sh.
@@ -188,8 +188,10 @@ if [ ! -d "$PATCHES_DIR" ]; then
     exit 1
 fi
 
-# Collect patches in numeric-prefix order. The order matters — patches
-# 0005-0008 stack on the file 0003 already modifies, so 0003 must land first.
+# Collect patches in numeric-prefix order. The order matters — patch 0011
+# stacks on the same StartupLoadProject.cs file that patch 0004 modifies,
+# so 0004 must land first. (Earlier history had patches 0005-0008 stacked
+# on 0003's file too; those were consolidated into 0003.)
 mapfile -t PATCHES < <(find "$PATCHES_DIR" -maxdepth 1 -name "*.patch" -type f | sort)
 if [ "${#PATCHES[@]}" -eq 0 ]; then
     err "No .patch files found under $PATCHES_DIR"

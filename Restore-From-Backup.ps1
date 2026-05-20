@@ -188,6 +188,18 @@ if (-not $doDiff -and -not $doZip) {
 
 if ($DryRun) {
     Step "Dry run; no files changed."
+    if ($doDiff) {
+        Write-Host "    would: git apply --3way --ignore-whitespace $diffPath" -ForegroundColor DarkGray
+    }
+    if ($doZip) {
+        Write-Host "    would: extract $($zipPath.FullName) -> $(Join-Path $SboxRoot 'game\addons')\" -ForegroundColor DarkGray
+    }
+    foreach ($aux in @('.mcp.json', 'CLAUDE.md')) {
+        $src = Join-Path $target.FullName $aux
+        if (Test-Path $src) {
+            Write-Host "    would: prompt + copy $src -> $(Join-Path $SboxRoot $aux)" -ForegroundColor DarkGray
+        }
+    }
     exit 0
 }
 
@@ -208,16 +220,24 @@ if ($doDiff) {
         if ($LASTEXITCODE -eq 0) {
             Ok "tracked.diff applied cleanly"
         } else {
-            Warn "git apply returned $LASTEXITCODE; output below:"
+            # Abort on failure rather than press on into the addon-zip
+            # step. Continuing would leave the engine in a half-restored
+            # state (conflict markers in some files, others unchanged)
+            # while the script tells the user "Done" — a worse failure
+            # mode than a clean abort with a recovery hint. Matches the
+            # .sh behavior on Linux.
+            Err "git apply returned $LASTEXITCODE; output below:"
             Write-Host $out -ForegroundColor DarkGray
             Write-Host ""
-            Write-Host "[!!] Manual recovery options:" -ForegroundColor Yellow
+            Write-Host "[!!] Aborted before addon extraction. Manual recovery options:" -ForegroundColor Yellow
             Write-Host "[!!]   - Conflict markers in the affected files: resolve by hand, then 'git add' them" -ForegroundColor Yellow
             Write-Host "[!!]   - Or discard your local mods first:" -ForegroundColor Yellow
             Write-Host "[!!]       git restore engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs" -ForegroundColor Yellow
             Write-Host "[!!]       git restore engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs" -ForegroundColor Yellow
             Write-Host "[!!]     then re-run this script." -ForegroundColor Yellow
             Write-Host "[!!]   - Or try a different snapshot: .\Restore-From-Backup.bat -List" -ForegroundColor Yellow
+            Pop-Location
+            exit 1
         }
     } finally {
         Pop-Location
@@ -283,14 +303,20 @@ if ($doZip) {
     }
 }
 
-# Optional auxiliary files - prompt before restoring since these are
-# environment-specific (.mcp.json, your container's MCP config) or
-# user-specific (CLAUDE.md, your Claude Code working-doc at sbox-public root).
+# Optional auxiliary files - environment-specific (.mcp.json, your
+# container's MCP config) or user-specific (CLAUDE.md, your Claude Code
+# working-doc at sbox-public root). Under -Yes we auto-restore them; the
+# user opted in to non-interactive mode and presumably wants the full
+# snapshot back. Without -Yes we prompt per file.
 foreach ($aux in @('.mcp.json', 'CLAUDE.md')) {
     $src = Join-Path $target.FullName $aux
     if (-not (Test-Path $src)) { continue }
     Write-Host ""
-    $reply = Read-Host "Restore '$aux' from snapshot to sbox-public root? [y/N]"
+    if ($Yes) {
+        $reply = 'y'
+    } else {
+        $reply = Read-Host "Restore '$aux' from snapshot to sbox-public root? [y/N]"
+    }
     if ($reply -match '^[yY]') {
         Copy-Item $src (Join-Path $SboxRoot $aux) -Force
         Ok "$aux restored"

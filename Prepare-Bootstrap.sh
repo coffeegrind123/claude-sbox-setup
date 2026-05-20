@@ -109,3 +109,20 @@ else
     err "Holders still present after SIGKILL — investigate manually with lsof +D $MANAGED_DIR"
     exit 1
 fi
+
+# Shut down the dotnet persistent build server. It doesn't show up in
+# `lsof +D <managed-dir>` (its working dir is elsewhere) but it can hold
+# stale references to managed DLLs across rebuilds — the .ps1 ends with
+# this call for the same reason. Non-fatal if no server is running
+# (dotnet returns non-zero in that case, which is normal).
+echo
+echo -n "    dotnet build-server shutdown..."
+if command -v dotnet >/dev/null 2>&1; then
+    if dotnet build-server shutdown >/dev/null 2>&1; then
+        echo " ${C_GREEN}ok${C_RESET}"
+    else
+        echo " ${C_RED}returned non-zero (likely no server was running)${C_RESET}"
+    fi
+else
+    echo " ${C_YELLOW}skipped (dotnet CLI not in PATH)${C_RESET}"
+fi

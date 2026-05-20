@@ -9,6 +9,13 @@ rem      are preserved on re-run).
 rem   3. Run the churn assertions so a missing reflection site fails loudly
 rem      with a file:line + blast-radius diagnostic before any spec test runs.
 rem
+rem Flags:
+rem   (none)        run all three stages (build -> generate -> churn)
+rem   --build       just build
+rem   --generate    just run the spec generator (build must have run already)
+rem   --churn       just run churn assertions
+rem   --all         explicit form of the default
+rem
 rem Prereq: sbox must have built the ClaudeSbox addon at least once
 rem (game\.vs\output\ClaudeSbox.dll exists -- whatever drive your checkout is on).
 rem If you've never run the editor on this checkout, open it once and let the
@@ -23,6 +30,25 @@ rem live in the addon proper, one directory over.
 
 cd /d "%~dp0"
 
+set STAGE=all
+:argloop
+if "%~1"=="" goto argdone
+if /i "%~1"=="--build"    set STAGE=build
+if /i "%~1"=="-Build"     set STAGE=build
+if /i "%~1"=="build"      set STAGE=build
+if /i "%~1"=="--generate" set STAGE=generate
+if /i "%~1"=="-Generate"  set STAGE=generate
+if /i "%~1"=="generate"   set STAGE=generate
+if /i "%~1"=="--churn"    set STAGE=churn
+if /i "%~1"=="-Churn"     set STAGE=churn
+if /i "%~1"=="churn"      set STAGE=churn
+if /i "%~1"=="--all"      set STAGE=all
+if /i "%~1"=="-All"       set STAGE=all
+if /i "%~1"=="all"        set STAGE=all
+shift
+goto argloop
+:argdone
+
 set TESTS_PROJ=..\claude-sbox\Tests\ClaudeSbox.Tests.csproj
 
 if not exist "%TESTS_PROJ%" (
@@ -34,6 +60,12 @@ if not exist "%TESTS_PROJ%" (
 	exit /b 1
 )
 
+if "%STAGE%"=="all" goto do_build
+if "%STAGE%"=="build" goto do_build
+if "%STAGE%"=="generate" goto do_generate
+if "%STAGE%"=="churn" goto do_churn
+
+:do_build
 echo.
 echo === [1/3] Building ClaudeSbox.Tests ===
 dotnet build %TESTS_PROJ% -nologo -v minimal
@@ -43,7 +75,9 @@ if errorlevel 1 (
 	echo Open the editor once so the addon compiles, then re-run this script.
 	exit /b 1
 )
+if "%STAGE%"=="build" goto done
 
+:do_generate
 echo.
 echo === [2/3] Generating starter spec yamls ===
 dotnet test %TESTS_PROJ% --no-build --filter "TestCategory=Generator" --logger "console;verbosity=normal" -nologo
@@ -52,7 +86,9 @@ if errorlevel 1 (
 	echo Spec generation failed. Inspect the test output above.
 	exit /b 1
 )
+if "%STAGE%"=="generate" goto done
 
+:do_churn
 echo.
 echo === [3/3] Running churn assertions ===
 dotnet test %TESTS_PROJ% --no-build --filter "FullyQualifiedName~A_ChurnAssertions" --logger "console;verbosity=normal" -nologo
@@ -67,6 +103,7 @@ if errorlevel 1 (
 	exit /b 1
 )
 
+:done
 echo.
 echo === Done ===
 echo Specs: ..\claude-sbox\Tests\specs\

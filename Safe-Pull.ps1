@@ -160,12 +160,13 @@ $expectedPatches = @{
     'engine/Sandbox.Tools/StartupLoadProject.cs' = '.sbox-global'
     'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs' = 'Package.TypeName == "tool"'
     'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageLoader.cs' = 'Extend the "tool assemblies'
-    # Utility.Projects.Compile.cs is touched by patches 0003 + 0005 + 0006 + 0007 + 0008
-    # (different blocks). The marker above covers patch 0003's GlobalToolsNamespace
-    # conditional; patches 0005-0008's individual blocks aren't independently verified
-    # here because Hashtable can't key multiple entries by the same file path.
-    # Acceptable -- the blocks are clustered close together in the file, so an upstream
-    # conflict that strips only some of them but leaves patch 0003 intact is unlikely.
+    # Utility.Projects.Compile.cs is touched by patch 0003 (which now consolidates
+    # what used to be patches 0003-0008 -- five distinct blocks against the same
+    # publish-compile file). The marker above covers the type-equality check inside
+    # the consolidated patch; the other blocks aren't independently verified because
+    # Hashtable can't key multiple entries by the same file path. Acceptable -- the
+    # blocks are clustered close together in the file, so an upstream conflict that
+    # strips only some of them but leaves the type-equality block intact is unlikely.
 }
 
 # Map: tracked engine file → patches/<file>.patch. The .gitignore is NOT here
@@ -327,10 +328,10 @@ if ($DryRun) {
 # Strategy:
 #   - Refresh the regeneratable patches in $enginePatches from the working
 #     tree (captures any incremental edits the user made since the last
-#     refresh) so we don't lose work. Hand-maintained patches 0005-0008 +
-#     0011 multiplex extra modifications onto two files already covered
-#     by $enginePatches; they live in patches/ on disk and aren't
-#     regenerated here.
+#     refresh) so we don't lose work. Hand-maintained patch 0011
+#     multiplexes an extra modification onto a file already covered by
+#     $enginePatches (StartupLoadProject.cs, also touched by 0004); it
+#     lives in patches/ on disk and isn't regenerated here.
 #   - Restore EVERY engine file touched by ANY patch to HEAD via
 #     `git checkout HEAD --` so they're at upstream-pristine state for
 #     the pull. (Critical bug fix: earlier versions only reset the 3 files
@@ -341,9 +342,10 @@ if ($DryRun) {
 #     append-only, low conflict risk).
 #   - git pull --ff-only.
 #   - git apply --3way for EVERY patch in patches/*.patch (in numeric
-#     order — patches 0005-0008 stack on 0003's file, so the apply
-#     sequence is significant). Re-introduces engine modifications across
-#     all 7 patches, not just the regeneratable 3.
+#     order — patch 0011 stacks on the StartupLoadProject.cs file 0004
+#     modifies, so the apply sequence is significant). Re-introduces
+#     engine modifications across all 7 patches, not just the
+#     regeneratable 3.
 #   - git stash pop to re-introduce .gitignore.
 #
 # `git apply --3way` is the win here: it knows each patch's original parent
@@ -396,8 +398,8 @@ foreach ($entry in $enginePatches.GetEnumerator()) {
 # Authoritative list of engine files the patches touch. Derived from
 # $expectedPatches minus the .gitignore key. We reset all of these to HEAD
 # so the pull has a clean tree for those paths, then re-apply every patch
-# in patches/ — covering both the regeneratable 3 and the hand-maintained
-# 8 that share working-tree files.
+# in patches/ — covering both the regeneratable patches in $enginePatches
+# and the hand-maintained 0011 that shares StartupLoadProject.cs with 0004.
 $patchedEngineFiles = $expectedPatches.Keys | Where-Object { $_ -ne '.gitignore' }
 
 Step "Reverting patched engine files to HEAD (clean state for pull)"
@@ -438,11 +440,11 @@ if ($pullExit -ne 0) {
 #
 # Apply strategy: strict first, --3way only as fallback. The earlier version
 # of this script used --3way unconditionally, which fails for stacked
-# patches (0005-0008): their "before" blob hash refers to HEAD+0003 state
-# which isn't a git-tracked blob, so --3way can't find it and produces
-# conflict markers on what would be a clean strict apply against the
-# already-0003-patched working tree. Mirrors Setup.ps1's tier 1 → tier 2
-# escalation.
+# patches (e.g. patch 0011 against StartupLoadProject.cs): their "before"
+# blob hash refers to HEAD+0004 state which isn't a git-tracked blob, so
+# --3way can't find it and produces conflict markers on what would be a
+# clean strict apply against the already-0004-patched working tree.
+# Mirrors Setup.ps1's tier 1 → tier 2 escalation.
 Step "Re-applying engine patches from patches/ on disk"
 $allPatches = Get-ChildItem (Join-Path $SetupDir 'patches') -Filter '*.patch' -ErrorAction SilentlyContinue | Sort-Object Name
 if ($allPatches.Count -eq 0) {

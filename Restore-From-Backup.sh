@@ -69,16 +69,31 @@ fi
 # Listing branch — when --list, OR when no action flag was given.
 if [ "$LIST" -eq 1 ] || { [ -z "$SNAPSHOT" ] && [ "$NEWEST" -eq 0 ] && [ "$PATCHES_ONLY" -eq 0 ] && [ "$ADDON_ONLY" -eq 0 ] && [ "$DRY_RUN" -eq 0 ] && [ "$YES" -eq 0 ]; }; then
     step "Available snapshots"
-    printf "    %-30s %-12s %s\n" "Snapshot" "Mtime" "Has"
+    printf "    %-22s %-11s %-7s %-16s %s\n" "Snapshot" "HeadSha" "ArchMB" "Mtime" "Has"
     for s in "${SNAPSHOTS[@]}"; do
         name="$(basename "$s")"
         mtime="$(date -r "$s" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')"
+        # First 10 chars of head.txt — same truncation .ps1 does.
+        if [ -f "$s/head.txt" ]; then
+            head_sha="$(head -c 10 "$s/head.txt" 2>/dev/null)"
+        else
+            head_sha="<unknown>"
+        fi
+        # Archive size in MB. Prefer .tar.gz; fall back to .zip from a
+        # Windows snapshot. du -m rounds up; same shape as .ps1's
+        # [math]::Round(... / 1MB, 1) modulo decimal precision.
+        arch_mb="-"
+        if [ -f "$s/claude-sbox-addon.tar.gz" ]; then
+            arch_mb="$(du -m "$s/claude-sbox-addon.tar.gz" 2>/dev/null | awk '{print $1}')"
+        elif [ -f "$s/claude-sbox-addon.zip" ]; then
+            arch_mb="$(du -m "$s/claude-sbox-addon.zip" 2>/dev/null | awk '{print $1}')"
+        fi
         has=""
-        [ -f "$s/tracked.diff" ]              && has="${has}diff "
-        [ -f "$s/claude-sbox-addon.tar.gz" ]  && has="${has}tar "
-        [ -f "$s/.mcp.json" ]                 && has="${has}mcp "
-        [ -f "$s/CLAUDE.md" ]                 && has="${has}claude "
-        printf "    %-30s %-12s %s\n" "$name" "$mtime" "$has"
+        [ -f "$s/tracked.diff" ]                                            && has="${has}diff "
+        [ -f "$s/claude-sbox-addon.tar.gz" ] || [ -f "$s/claude-sbox-addon.zip" ] && has="${has}archive "
+        [ -f "$s/.mcp.json" ]                                                && has="${has}mcp "
+        [ -f "$s/CLAUDE.md" ]                                                && has="${has}claude "
+        printf "    %-22s %-11s %-7s %-16s %s\n" "$name" "$head_sha" "$arch_mb" "$mtime" "$has"
     done
     echo
     echo "To restore everything from the newest: ./Restore-From-Backup.sh --newest --yes"

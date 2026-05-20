@@ -126,6 +126,19 @@ if errorlevel 1 (
 
 popd
 
+rem Generic build error scan — catches Bootstrap failures that the exit code
+rem might not propagate (e.g. a tee-piped sub-process erroring while
+rem Bootstrap.bat itself returns 0, late MSBuild warnings escalated to
+rem errors, Roslyn CS errors that exited via a different code path).
+rem Mirror of the .sh's build-failure scanner. Only flips BOOT_EXIT to a
+rem failure code if Bootstrap.bat itself reported success — we don't want
+rem to mask an already-failing exit.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$m = Select-String -Path '%ADDON_DIR%\bootstrap-out.log' -Pattern 'Build FAILED|error MSB[0-9]|error CS[0-9]' | Select-Object -First 10; if ($m) { Write-Host ('    [!!] Build log contains error markers:') -ForegroundColor Yellow; $m | ForEach-Object { Write-Host ('    [!!]   ' + $_.Line) -ForegroundColor DarkGray }; exit 1 } else { exit 0 }"
+if errorlevel 1 (
+    if "%BOOT_EXIT%"=="0" set BOOT_EXIT=1
+    echo [WARN] Inspect %ADDON_DIR%\bootstrap-out.log for the full failure context.
+)
+
 rem ----- [4/4] Cleanup ------------------------------------------------------
 rem Count entries in locked-files.txt. Get-Content auto-detects the UTF-16
 rem BOM that Tee-Object wrote, so the count is correct regardless of encoding.

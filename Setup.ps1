@@ -30,70 +30,37 @@
          RefreshCloudAssets cross-project eviction. Scoped to claude-sbox
          only; other cloud packages keep default per-project cache behaviour.
 
-      5. engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
-         Skips the unconditional "editor" IgnoreFolders entry at
-         publish-compile time when the project type is "tool". Facepunch's
-         publish path adds "editor" to IgnoreFolders unconditionally,
-         which is correct for game/library addons (Code/Editor/ holds
-         editor-only inspectors and tool windows that shouldn't ship to
-         players) but actively wrong for tool-type addons -- a tool
-         addon is ENTIRELY editor code, almost always namespaced under
-         Editor.<X> with all source under Code/Editor/. Adding "editor"
-         to IgnoreFolders silently strips the whole codebase, packs only
-         Code/Imports.cs into the .cll, and produces an empty (~1KB)
-         package that mounts with no [Event] handlers. With this patch
-         tool publishes ship real code. Maintainers-only -- only matters
-         if you're republishing the addon to sbox.game, not for
-         installing it. Touches the same file as patch 3 but a different
-         block; both apply cleanly in sequence.
+      3. (continued, in the same patch file 0003) — gates the
+         unconditional `IgnoreFolders.Add( "editor" )` on `Type != tool`,
+         sets `compileGroup.ReferenceProvider` so `package.toolbase`
+         resolves at publish time, nulls out the AccessControl whitelist
+         for tool publishes, mirrors the in-editor compile's explicit
+         assembly references (Sandbox.Tools, Sandbox.Compiling, Roslyn,
+         Facepunch.ActionGraphs, SkiaSharp, etc.) into the publish
+         CompileGroup, and adds AddToolBaseReference for non-toolbase
+         projects. Maintainers-only -- only matters if you're
+         republishing the addon to sbox.game, not for installing it.
+         (Previously these five edits lived in separate patch files
+         0005-0008; they were consolidated into 0003 since they all
+         target the same publish-path file and Refresh-Patches kept
+         folding them back together on regen.)
 
-      6. engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs (third
-         block in the same file, inside patch 3's "if Type == tool"
-         block). Mirrors the in-editor compile's explicit assembly
-         references (Sandbox.Tools, Sandbox.Compiling, System.Diagnostics
-         .Process, System.Net.WebSockets[.Client], Microsoft.Win32
-         .Registry, System.Memory, Sandbox.Bind, Facepunch.ActionGraphs,
-         SkiaSharp, Microsoft.CodeAnalysis, Microsoft.CodeAnalysis.CSharp)
-         plus AddToolBaseReference for non-toolbase projects. Project
-         .Compiling.cs:109-122 adds all of these for the in-editor compile,
-         so addon code that uses them works at runtime; the publish-compile
-         in this file wasn't adding them and tool publishes failed with
-         hundreds of "type or namespace not found" errors. Maintainers-only.
-
-      7. engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs (fourth
-         block, immediately after CompileGroup creation). Sets the publish
-         CompileGroup's ReferenceProvider so cross-package references like
-         `package.toolbase` (from patch 6's AddToolBaseReference) can
-         resolve via PackageManager.ActivePackages.Lookup. In-editor compile
-         groups get a provider from their owning ActivePackage; the publish
-         CompileGroup is fresh and doesn't, so AddToolBaseReference throws
-         "Couldn't find reference package.toolbase" without this. Hands the
-         group any ActivePackage as the lookup root (they all share the
-         same global HashSet). Maintainers-only.
-
-      8. engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs (fifth
-         block, also near the CompileGroup creation). Nulls out the
-         AccessControl whitelist for tool-type publishes. The whitelist
-         restricts game/library publishes to a curated API surface (no
-         Process, File, HttpClient, raw editor types, ...) -- correct for
-         sandboxed runtime content but actively wrong for tool addons,
-         which by design need full editor + .NET access. In-editor compile
-         never applies this whitelist; the publish path was the only place
-         enforcing it. Without this patch tool publishes fail with ~700
-         "is not allowed when whitelist is enabled" errors. Maintainers-only.
+      4. (continued, see entry 4 above for StartupLoadProject.cs.)
 
       9. engine/Sandbox.Engine/Services/Packages/PackageManager/
          PackageManager.ActivePackage.cs. The CLOUD-MOUNT counterpart to
-         patch 8. When a user installs ghage.claude-sbox from sbox.game,
-         the addon is mounted by ActivePackage.CompileCodeArchive, which
-         sets group.AccessControl = AccessControl on its own CompileGroup
-         and triggers the same whitelist check at mount time -- so users
+         patch 3's publish-compile AccessControl null-out. When a user
+         installs ghage.claude-sbox from sbox.game, the addon is mounted
+         by ActivePackage.CompileCodeArchive, which sets
+         group.AccessControl = AccessControl on its own CompileGroup and
+         triggers the same whitelist check at mount time -- so users
          who DON'T have the addon source-cloned at game/addons/claude-sbox/
-         can't load the addon either. Project.Compiling.cs:56 already sets
-         Whitelist=false for tool projects loaded via the source path; this
-         patch mirrors that by nulling AccessControl for tool-type packages
-         in the cloud-mount path. Patch 8 fixes the publishing side, patch
-         9 fixes the consuming side -- both needed for end-to-end cloud
+         can't load the addon either. Project.Compiling.cs:56 already
+         sets Whitelist=false for tool projects loaded via the source
+         path; this patch mirrors that by nulling AccessControl for
+         tool-type packages in the cloud-mount path. Patch 3's
+         AccessControl block fixes the publishing side; patch 9 fixes
+         the consuming side -- both needed for end-to-end cloud
          distribution of a tool addon.
 
       10. engine/Sandbox.Engine/Services/Packages/PackageManager/
@@ -117,9 +84,9 @@
           the same file as patch 4, immediately before patch 4's
           InstallAsync of ghage.claude-sbox). Mounts local.toolbase
           FIRST. The published claude-sbox.dll has a direct assembly
-          reference on package.toolbase (baked in by patch 6's
-          AddToolBaseReference). When the CLR runs the addon's static
-          constructors via RunAllStaticConstructors, it asks the
+          reference on package.toolbase (baked in by patch 3's
+          AddToolBaseReference block). When the CLR runs the addon's
+          static constructors via RunAllStaticConstructors, it asks the
           LoadContext to resolve `package.toolbase.dll`. In the
           unpatched OpenProject sequence local.toolbase is mounted via
           `PackageManager.InstallProjects( IsBuiltIn )` further down --
@@ -130,9 +97,11 @@
           PackageManager.InstallAsync is idempotent so the later
           InstallProjects re-install of toolbase becomes a no-op.
 
-    This script applies all seven patches to the parent sbox-public checkout.
-    It is idempotent: re-running on a checkout where the patches are already
-    applied is a no-op.
+    Seven patches in total (file numbers 0001-0004 + 0009-0011 -- gaps
+    are deliberate, see patch 3 history above). This script applies all
+    seven to the parent sbox-public checkout. It is idempotent:
+    re-running on a checkout where the patches are already applied is a
+    no-op.
 
     For routine sbox-public updates, prefer .\Safe-Pull.bat — it snapshots
     your state, reverts the patches, runs `git pull`, then re-applies the
@@ -343,7 +312,8 @@ try {
         # the patch as "already applied" when in reality the file is
         # clean and needs the patch applied fresh. The downstream effect
         # is partial patch coverage — patches stacked on the same file
-        # (like 0005-0008 on Utility.Projects.Compile.cs) cascade-fail.
+        # (like patch 0011 stacking on the same StartupLoadProject.cs
+        # file as 0004) would cascade-fail.
         #
         # Strict `--check --reverse` actually examines the working-tree
         # file's context lines and only succeeds when they match the

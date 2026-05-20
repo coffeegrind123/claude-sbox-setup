@@ -61,7 +61,10 @@ fi
 
 # Build snapshot folder name. Reason gets sanitised: anything not
 # alphanumeric/dash/underscore becomes a dash.
-STAMP="$(date -u +'%Y%m%d-%H%M%S')"
+# Local time (not UTC) — matches Snapshot-Now.ps1's Get-Date and how users
+# mentally tag their snapshots ("the one from this morning"). Cross-platform
+# snapshots taken in the same hour sort identically when they share a TZ.
+STAMP="$(date +'%Y%m%d-%H%M%S')"
 SLUG=""
 if [ -n "$REASON" ]; then
     # tr-based sanitization to mirror the .ps1's regex replace.

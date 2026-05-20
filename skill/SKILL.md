@@ -45,7 +45,7 @@ If `sbox_status` reports `connected=false`, the editor isn't running or the brid
 - **"do X for me"** → if X has a `[Menu]` entry, prefer `invoke_menu`. If `[Shortcut]`, prefer `invoke_shortcut`. They go through the same code path the user's manual click would, so notifications/undo behave naturally. Reach for low-level scene mutations only when there's no menu/shortcut.
 - **"how do I X?"** → `docs_search` for the prose explanation, `spotlight` for the visual answer (tour mode if multi-step), then offer to do it for them.
 - **"set my editor to X"** → `list_preferences` to find the property, `set_preference` to apply.
-- **"is there a tool for Y?"** → grep `references/tool-families.md` first (curated one-liner index over ~593 bridge tools). Reach for `list_tools` only if the family isn't there.
+- **"is there a tool for Y?"** → grep `references/tool-families.md` first (curated one-liner index over ~597 bridge tools). Reach for `list_tools` only if the family isn't there.
 - **session opener** → call `doctor` once. It returns a structured pass/warn/fail roll-up plus a single `next_suggested_action` so you don't have to ping/sbox_status/compile_check_build_state/list_unsaved_scenes individually.
 - **"do four things in a row"** → use `dispatcher_batch`. Each op runs through the normal dispatcher (own LogCapture window); refer to earlier results via `{"$ref": "alias.path"}`. Saves agent turns and roundtrips.
 
@@ -58,7 +58,7 @@ If `sbox_status` reports `connected=false`, the editor isn't running or the brid
 | Common gotchas (namespace surprises, signature traps, silent set_property failures, sdocs privacy, auto_* naming, widget_drag rejections) | `references/gotchas.md` |
 | Bodygroups: hiding/showing body parts on models (e.g. citizen) | `references/bodygroups.md` |
 | Live MCP tools you can call (curated, with usage stories) | `references/mcp-tools.md` |
-| "Is there a tool for X?": discovery index across all ~593 bridge tools | `references/tool-families.md` |
+| "Is there a tool for X?": discovery index across all ~597 bridge tools | `references/tool-families.md` |
 | Driving an open file dialog or spawning a modal file picker | Call `pick_file` (modal blocking) or `file_dialog_*` (drive an already-open dialog) |
 | Driving a tree widget (asset browser tree, scene hierarchy, etc.) | Call `tree_list_items` to discover paths, then `tree_select_item` / `_expand_node` / `_activate_item` |
 | Driving a tab page widget | Call `tab_list_pages` then `tab_select` |
