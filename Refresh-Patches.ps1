@@ -116,12 +116,14 @@ $autoSnapshotName = $null
 if (-not $env:SKIP_REFRESH_SNAPSHOT) {
     $snapshotScript = Join-Path $SetupDir 'Snapshot-Now.ps1'
     if (Test-Path $snapshotScript) {
-        & $snapshotScript -Reason 'before-refresh-patches' -Quiet
-        # Capture the name of the just-created snapshot so we can quote it
-        # in the recovery hint if Refresh-Patches' self-test fails.
-        $latest = Get-ChildItem (Join-Path $SetupDir '.backups') -Directory -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending | Select-Object -First 1
-        if ($latest) { $autoSnapshotName = $latest.Name }
+        # Snapshot-Now writes user-facing chatter via Write-Host (suppressed
+        # by -Quiet) and emits the snapshot dir's absolute path on the
+        # success Output stream. Capture it directly here instead of
+        # globbing .backups/ post-hoc — the glob approach was racy when two
+        # snapshots fell in the same wall-clock second (the timestamp+slug
+        # collided and the wrong dir could be picked).
+        $snapPath = & $snapshotScript -Reason 'before-refresh-patches' -Quiet
+        if ($snapPath) { $autoSnapshotName = Split-Path $snapPath -Leaf }
         Write-Host "[OK] auto-snapshot taken: $autoSnapshotName" -ForegroundColor DarkGray
         Write-Host "     (set `$env:SKIP_REFRESH_SNAPSHOT='1' to skip)" -ForegroundColor DarkGray
     }
@@ -202,7 +204,24 @@ if ($paths.Count -eq 0) {
 }
 
 # Stash just the patched files so the rest of the working tree is untouched.
-& git stash push -m $tempStash -- @paths | Out-Null
+# Route through Invoke-Native + capture exit code so a stash-push that
+# emitted no changes (or otherwise failed) doesn't lead us into a blind
+# `git stash pop` that grabs a UNRELATED prior stash entry. Without this
+# check the self-test loop could effectively restore someone's old work
+# from a stash they'd intentionally parked aside.
+$stashOut = Invoke-Native git stash push -m $tempStash -- @paths
+$stashExit = $LASTEXITCODE
+# Two acceptable shapes: a real save ("Saved working directory ...") or
+# "No local changes to save" — the latter is fine, just means the working
+# tree was already clean. Anything else is unexpected.
+$stashed = $stashExit -eq 0 -and ($stashOut -match 'Saved working directory')
+$noChanges = $stashOut -match 'No local changes to save'
+if (-not $stashed -and -not $noChanges) {
+    Write-Host "[XX] git stash push failed (exit $stashExit):" -ForegroundColor Red
+    $stashOut | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+    Show-RestoreHint
+    exit 1
+}
 
 # Self-test every .patch file on disk, not just the entries in $patchedFiles.
 # Patches 0005-0008 + 0011 are hand-maintained against files that ARE in
@@ -224,8 +243,11 @@ foreach ($patchFile in $allPatches) {
     }
 }
 
-# Restore the original working-tree state.
-& git stash pop | Out-Null
+# Restore the original working-tree state — but only if we actually stashed
+# something. Otherwise pop would consume an unrelated prior entry.
+if ($stashed) {
+    Invoke-Native git stash pop | Out-Null
+}
 
 if ($failed.Count -gt 0) {
     Write-Host ""

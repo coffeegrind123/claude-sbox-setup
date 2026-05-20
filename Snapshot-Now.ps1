@@ -55,9 +55,11 @@ function Ok($m)   { if (-not $Quiet) { Write-Host "    [OK] $m" -ForegroundColor
 function Warn($m) { Write-Host "    [!!] $m" -ForegroundColor Yellow }
 function Err($m)  { Write-Host "    [XX] $m" -ForegroundColor Red }
 
-# Sanity check.
-if (-not (Test-Path (Join-Path $SboxRoot 'Bootstrap.bat'))) {
-    Err "$SboxRoot does not look like a sbox-public checkout (no Bootstrap.bat)."
+# Sanity check. engine/ is the stable marker for a sbox-public checkout
+# (Bootstrap.bat exists today but Facepunch rewrites their bootstrap tooling
+# from time to time; engine/ has been there since the repo's first commit).
+if (-not (Test-Path (Join-Path $SboxRoot 'engine') -PathType Container)) {
+    Err "$SboxRoot does not look like a sbox-public checkout (no engine/ dir)."
     exit 1
 }
 if (-not (Test-Path (Join-Path $SboxRoot '.git'))) {
@@ -72,8 +74,22 @@ $slug = ''
 if ($Reason) {
     $slug = '-' + (($Reason -replace '[^A-Za-z0-9_-]', '-') -replace '-+', '-').Trim('-')
 }
-$backupDir = Join-Path $BackupRoot "$stamp$slug"
-New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+$dirName = "$stamp$slug"
+$backupDir = Join-Path $BackupRoot $dirName
+
+# Same-second-collision guard. If Snapshot-Now runs twice in the same wall-
+# clock second with the same -Reason (back-to-back Refresh-Patches calls, a
+# retry-script smashing Enter), the resulting dir name is identical and the
+# earlier version of this script silently merged two snapshots into one
+# (overwriting head.txt + tracked.diff with the second run's contents).
+# Append a -NN suffix until we land on an unused name.
+if (Test-Path $backupDir) {
+    $n = 2
+    while (Test-Path "$backupDir-$n") { $n++ }
+    $dirName = "$dirName-$n"
+    $backupDir = "$backupDir-$n"
+}
+New-Item -ItemType Directory -Path $backupDir | Out-Null
 
 Step "Snapshot to $backupDir"
 
@@ -120,5 +136,14 @@ try {
 if (-not $Quiet) {
     Write-Host ""
     Write-Host "Restore later with:" -ForegroundColor Cyan
-    Write-Host "    .\Restore-From-Backup.bat -Snapshot $stamp$slug"
+    Write-Host "    .\Restore-From-Backup.bat -Snapshot $dirName"
 }
+
+# Emit the snapshot dir's absolute path on the success Output stream so
+# callers can capture it (e.g. `$snap = & .\Snapshot-Now.ps1 -Quiet`). All
+# user-facing Step / Ok / Warn / Err calls go to Write-Host so they don't
+# pollute Output; this is the only Write-Output in the script. Previously
+# callers had to glob `.backups/` and sort-by-name to find "which dir did
+# Snapshot-Now just create" — racy when two snapshots fell in the same
+# second.
+Write-Output $backupDir

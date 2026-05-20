@@ -11,8 +11,6 @@
         tracked.diff                git diff of every tracked-file mod
                                     (engine patches, .gitignore, etc.)
         claude-sbox-addon.zip       full addon tree zipped
-        openclaude-addon.zip        legacy name for snapshots from before
-                                    the openclaude -> claude-sbox rename
         .mcp.json, CLAUDE.md        verbatim copies, if present at pull time
 
     This script lists what's available, lets you pick one, and restores some
@@ -60,7 +58,18 @@ param(
     [switch]$PatchesOnly,
     [switch]$AddonOnly,
     [switch]$DryRun,
-    [switch]$Yes
+    [switch]$Yes,
+    # Allow the zip-extract step to overwrite existing files in the target
+    # tree. Without this, a collision aborts the addon-restore step with a
+    # clear recovery hint. Use when you know the existing tree is the one
+    # you're trying to replace (i.e. addon dev iteration on the same clone).
+    [switch]$Force,
+    # Explicitly opt in to "restore the newest snapshot" without naming it.
+    # Required when no -Snapshot is given and -Yes is set — otherwise -Yes
+    # alone would silently kick off a full restore against whatever happens
+    # to be the most recent backup, which is a surprising amount of mutation
+    # for a single-letter flag to imply.
+    [switch]$Newest
 )
 
 $ErrorActionPreference = 'Continue'
@@ -93,7 +102,10 @@ if ($snapshots.Count -eq 0) {
 }
 
 # Print summary table when -List was passed or when no action flag was given.
-if ($List -or (-not $Snapshot -and -not $PatchesOnly -and -not $AddonOnly -and -not $DryRun -and -not $Yes)) {
+# -Newest is treated as "give me an action without naming a snapshot"; without
+# it (or -Snapshot), -Yes alone falls into the list branch instead of silently
+# restoring the most recent snapshot.
+if ($List -or (-not $Snapshot -and -not $Newest -and -not $PatchesOnly -and -not $AddonOnly -and -not $DryRun -and -not $Yes)) {
     Step "Available snapshots"
     $rows = foreach ($s in $snapshots) {
         $headFile = Join-Path $s.FullName 'head.txt'
@@ -115,13 +127,15 @@ if ($List -or (-not $Snapshot -and -not $PatchesOnly -and -not $AddonOnly -and -
     }
     $rows | Format-Table -AutoSize
     Write-Host ""
-    Write-Host "To restore everything from the newest: .\Restore-From-Backup.ps1 -Yes"
+    Write-Host "To restore everything from the newest: .\Restore-From-Backup.ps1 -Newest -Yes"
     Write-Host "To restore a specific snapshot:       .\Restore-From-Backup.ps1 -Snapshot $($snapshots[0].Name) -Yes"
-    Write-Host "Other flags: -PatchesOnly, -AddonOnly, -DryRun"
+    Write-Host "Other flags: -PatchesOnly, -AddonOnly, -DryRun, -Force (overwrite addon zip)"
     exit 0
 }
 
-# Pick the target snapshot.
+# Pick the target snapshot. -Yes alone (no -Snapshot, no -Newest) is rejected
+# above; if we got here without a -Snapshot, the user must have passed -Newest
+# or one of the granular flags that defaults to newest.
 if ($Snapshot) {
     $target = $snapshots | Where-Object { $_.Name -eq $Snapshot } | Select-Object -First 1
     if (-not $target) {
@@ -131,6 +145,9 @@ if ($Snapshot) {
     }
 } else {
     $target = $snapshots[0]
+    if ($Newest) {
+        Ok "no -Snapshot supplied; -Newest selects $($target.Name)"
+    }
 }
 
 Step "Restore plan"
@@ -161,7 +178,6 @@ if ($doZip) {
         $doZip = $false
     } else {
         Write-Host "    will extract: $($zipPath.FullName) -> game\addons\<top-level-in-zip>\"
-        Write-Host "    (top-level folder in older snapshots is 'openclaude\'; newer ones are 'claude-sbox\')"
     }
 }
 
@@ -208,10 +224,9 @@ if ($doDiff) {
     }
 }
 
-# Extract the addon zip into game/addons/. Each zip contains a top-level
-# folder ('openclaude\' or 'claude-sbox\') matching where the addon lived
-# at the time of the snapshot. We extract preserving structure so the user
-# can decide whether to use the historical name or rename to current.
+# Extract the addon zip into game/addons/. The zip contains a top-level
+# 'claude-sbox\' folder matching where the addon lives. We extract
+# preserving structure so it lands at the expected path.
 if ($doZip) {
     Step "Extract addon zip"
     $gameAddons = Join-Path $SboxRoot 'game\addons'
@@ -234,19 +249,37 @@ if ($doZip) {
     $extractTarget = Join-Path $gameAddons $topLevel
     Write-Host "    extracting -> $extractTarget"
 
-    # Expand-Archive doesn't auto-overwrite in PS 5.1; use raw API.
-    [System.IO.Compression.ZipFile]::ExtractToDirectory(
-        $zipPath.FullName,
-        $gameAddons,
-        $false  # don't overwrite by default
-    ) 2>&1 | ForEach-Object {
-        # ExtractToDirectory throws on conflict; catch shown below.
-    }
-    if ($?) {
+    # Expand-Archive doesn't auto-overwrite in PS 5.1; use the raw .NET API
+    # which has an explicit `overwriteFiles` bool. The earlier version of
+    # this block passed `$false` and relied on the post-call `$?` check,
+    # but ExtractToDirectory THROWS IOException on the first existing
+    # file rather than emitting a non-terminating error — so $? never
+    # fired and the script aborted with a confusing stack trace mid-
+    # restore, leaving a half-extracted tree.
+    #
+    # Now we always pass $true when -Force is set (explicit user opt-in)
+    # and otherwise wrap in try/catch so a collision surfaces as a
+    # readable error with a clear recovery path. Either way the call is
+    # idempotent: if the target tree is clean, both modes succeed; if it
+    # has files, -Force overwrites and no-Force errors clearly.
+    $overwrite = [bool]$Force
+    try {
+        [System.IO.Compression.ZipFile]::ExtractToDirectory(
+            $zipPath.FullName,
+            $gameAddons,
+            $overwrite
+        )
         Ok "addon tree restored to $extractTarget"
-    } else {
-        Warn "Extract reported errors. If files already existed, delete the target folder"
-        Warn "and re-run, or extract by hand with: Expand-Archive '$($zipPath.FullName)' '$gameAddons' -Force"
+    } catch [System.IO.IOException] {
+        Warn "Zip extract collided with existing files under $extractTarget."
+        Warn "Either:"
+        Warn "  - Re-run with -Force to overwrite in place, OR"
+        Warn "  - Delete the target tree and re-run (manual: Remove-Item '$extractTarget' -Recurse -Force)"
+        Warn "Snapshot zip remains at $($zipPath.FullName) for manual inspection."
+        Warn "First conflict: $($_.Exception.Message)"
+    } catch {
+        Err "Zip extract failed: $($_.Exception.Message)"
+        Err "Snapshot zip remains at $($zipPath.FullName); inspect manually."
     }
 }
 

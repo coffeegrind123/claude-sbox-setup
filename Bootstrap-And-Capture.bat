@@ -53,7 +53,7 @@ for %%I in ("%ADDON_DIR%\..\..\..") do set SBOX_ROOT=%%~fI
 
 if not exist "%SBOX_ROOT%\Bootstrap.bat" (
     echo [ERROR] Bootstrap.bat not found at %SBOX_ROOT%.
-    echo         This script must live at ^<sbox-public-root^>^\game^\addons^\claude-sbox^\.
+    echo         This script must live at ^<sbox-public-root^>^\game^\addons^\claude-sbox-setup^\.
     exit /b 1
 )
 if not exist "%ADDON_DIR%\Prepare-Bootstrap.ps1" (
@@ -112,7 +112,17 @@ rem leave a stale locked-files.txt from an earlier run when the current
 rem bootstrap succeeded cleanly. That led to "delete 22 files" prompts on
 rem runs that should have reported 0 locked files, deleting freshly-restored
 rem native DLLs and re-breaking the install.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$paths = Select-String -Path '%ADDON_DIR%\bootstrap-out.log' -Pattern 'being used by another process' | ForEach-Object { if ($_.Line -match '''([^'']+\.(?:dll|exe))''') { $Matches[1] } } | Sort-Object -Unique; if ($paths) { $paths | ForEach-Object { Write-Host $_ } }; Set-Content -Path '%ADDON_DIR%\locked-files.txt' -Value $paths -Encoding UTF8"
+rem -EA Stop turns any silent PS error (missing log file, regex glitch, etc.)
+rem into a non-zero exit so the cmd shell sees a real failure instead of
+rem proceeding with a stale locked-files.txt from a previous run.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $paths = Select-String -Path '%ADDON_DIR%\bootstrap-out.log' -Pattern 'being used by another process' | ForEach-Object { if ($_.Line -match '''([^'']+\.(?:dll|exe))''') { $Matches[1] } } | Sort-Object -Unique; if ($paths) { $paths | ForEach-Object { Write-Host $_ } }; Set-Content -Path '%ADDON_DIR%\locked-files.txt' -Value $paths -Encoding UTF8"
+if errorlevel 1 (
+    echo [WARN] Could not extract locked files from bootstrap-out.log
+    echo [WARN]   ^(Bootstrap.bat may have failed before producing the log.^)
+    echo [WARN]   Continuing with an empty locked-files.txt.
+    rem Ensure the file exists + is empty so the count step downstream gets 0.
+    type nul > "%ADDON_DIR%\locked-files.txt"
+)
 
 popd
 

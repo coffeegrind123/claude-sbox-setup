@@ -8,10 +8,14 @@
 .DESCRIPTION
     The repo holds two kinds of in-progress work that a careless `git pull`
     or destructive command could nuke:
-        1. Engine files modified by the claude-sbox patches — currently
-           `engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs`,
-           `engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs`, and
-           `engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs`.
+        1. Engine files modified by the claude-sbox patches — six files
+           total covered by eleven .patch files under
+           `claude-sbox-setup/patches/`. The authoritative list is the
+           `$expectedPatches` hashtable below; new patches must be added
+           there. Note that patches 0005-0008 (Utility.Projects.Compile.cs
+           multi-block) and 0011 (StartupLoadProject.cs second block)
+           stack additional modifications on files patches 0003 / 0004
+           already touch.
         2. Untracked work that lives outside any tracked file — the
            claude-sbox addon source if you have it under
            `game/addons/claude-sbox/`, plus any local `.mcp.json` or
@@ -124,11 +128,15 @@ function Invoke-Native {
 # 1. Sanity — are we at the sbox-public root with the addon present?
 # ──────────────────────────────────────────────────────────────────────────
 Step "Sanity check"
-if (-not (Test-Path .\Bootstrap.bat)) {
-    Err "Bootstrap.bat not found in cwd. cd to sbox-public root first."; exit 1
-}
+# Markers we use to confirm this is a sbox-public checkout: a git repo with
+# an `engine/` directory at the root. Bootstrap.bat used to be the marker
+# but Facepunch occasionally rewrites their bootstrap tooling; the `engine/`
+# dir is a much more stable identity check.
 if (-not (Test-Path .\.git)) {
-    Err "Not a git repository."; exit 1
+    Err "Not a git repository (no .git/ at cwd)."; exit 1
+}
+if (-not (Test-Path .\engine -PathType Container)) {
+    Err "engine/ directory not found in cwd. cd to sbox-public root first."; exit 1
 }
 $addonSrcPresent = Test-Path .\game\addons\claude-sbox
 if ($addonSrcPresent) {
@@ -204,7 +212,9 @@ if ($missing.Count -gt 0) {
 }
 
 # Existing stash entries from a prior failed run would confuse the pop step.
-$stashList = git stash list
+# Route via Invoke-Native so git's stderr (e.g. CRLF warnings) doesn't trip
+# the script-wide EAP=Stop and abort here before the check completes.
+$stashList = Invoke-Native git stash list
 if ($stashList -and -not $Force) {
     Warn "Existing stash entries found:"
     $stashList | ForEach-Object { Warn "  $_" }
@@ -278,7 +288,10 @@ if ($ahead -eq 0) {
 }
 
 Step "Check overlap with our patches"
-$incoming = git diff --name-only HEAD origin/master
+# Same Invoke-Native rationale as the stash-list call: a stderr line from
+# git (e.g. CRLF normalization warning) would otherwise terminate the
+# script under EAP=Stop before $incoming is populated.
+$incoming = Invoke-Native git diff --name-only HEAD origin/master
 $overlap = @()
 foreach ($file in $expectedPatches.Keys) {
     if ($incoming -contains $file) { $overlap += $file }
@@ -300,14 +313,25 @@ if ($DryRun) {
 # 5. Pull flow — patches/* for engine files, stash for the rest
 #
 # Strategy:
-#   - Refresh patches/*.patch from the working tree (captures any incremental
-#     edits the user made since the last refresh) so we don't lose work.
-#   - Restore the patched engine files to HEAD via `git checkout HEAD --`
-#     so they're at upstream-pristine state for the pull.
+#   - Refresh the regeneratable patches in $enginePatches from the working
+#     tree (captures any incremental edits the user made since the last
+#     refresh) so we don't lose work. Hand-maintained patches 0005-0008 +
+#     0011 multiplex extra modifications onto two files already covered
+#     by $enginePatches; they live in patches/ on disk and aren't
+#     regenerated here.
+#   - Restore EVERY engine file touched by ANY patch to HEAD via
+#     `git checkout HEAD --` so they're at upstream-pristine state for
+#     the pull. (Critical bug fix: earlier versions only reset the 3 files
+#     in $enginePatches and let patches 0004-0011 ride the catch-all stash
+#     across the pull, which conflicted whenever upstream touched those
+#     files.)
 #   - Stash whatever's left modified (in practice, just .gitignore — small,
 #     append-only, low conflict risk).
 #   - git pull --ff-only.
-#   - git apply --3way patches/*.patch to re-introduce engine modifications.
+#   - git apply --3way for EVERY patch in patches/*.patch (in numeric
+#     order — patches 0005-0008 stack on 0003's file, so the apply
+#     sequence is significant). Re-introduces engine modifications across
+#     all 11 patches, not just the regeneratable 3.
 #   - git stash pop to re-introduce .gitignore.
 #
 # `git apply --3way` is the win here: it knows each patch's original parent
@@ -318,7 +342,6 @@ if ($DryRun) {
 # ──────────────────────────────────────────────────────────────────────────
 
 Step "Refreshing patches/* from current working-tree state"
-$patchesToApply = @()
 foreach ($entry in $enginePatches.GetEnumerator()) {
     $sourcePath = $entry.Key
     $patchPath = $entry.Value
@@ -326,8 +349,12 @@ foreach ($entry in $enginePatches.GetEnumerator()) {
         Warn "$sourcePath doesn't exist — skipping"
         continue
     }
-    $diff = & git diff -- $sourcePath
-    if ([string]::IsNullOrWhiteSpace($diff)) {
+    # Route git diff through Invoke-Native so stderr noise doesn't trip
+    # EAP=Stop and leave $diff unassigned (which would mis-classify the
+    # file as "no local mods" and silently corrupt the patch on the way
+    # out).
+    $diff = Invoke-Native git diff -- $sourcePath
+    if ([string]::IsNullOrWhiteSpace(($diff -join "`n"))) {
         # File matches HEAD; no patch needed. If a stale patch exists, leave
         # it alone — the user may have intentionally reverted but kept the
         # patch for reference. Better to be conservative here.
@@ -335,22 +362,26 @@ foreach ($entry in $enginePatches.GetEnumerator()) {
         continue
     }
     New-Item -ItemType Directory -Force -Path (Split-Path $patchPath) | Out-Null
-    # $patchPath is now absolute ($SetupDir\patches\...). Earlier it was
-    # relative and we Join-Path'd with cwd; doing that on an absolute path
-    # produces a mangled "C:\sbox\C:\sbox\..." string that WriteAllText
-    # rejects with "given path's format is not supported." Use the path
-    # directly.
+    # $patchPath is absolute ($SetupDir\patches\...). Pass straight to
+    # WriteAllText; mixing it through Join-Path with cwd produces a
+    # mangled "C:\sbox\C:\sbox\..." string that the API rejects.
     [System.IO.File]::WriteAllText(
         $patchPath,
         ($diff -join "`n") + "`n",
         (New-Object System.Text.UTF8Encoding $false)
     )
-    $patchesToApply += $patchPath
     Ok "wrote $patchPath ($([int]((Get-Item $patchPath).Length / 1)) bytes)"
 }
 
+# Authoritative list of engine files the patches touch. Derived from
+# $expectedPatches minus the .gitignore key. We reset all of these to HEAD
+# so the pull has a clean tree for those paths, then re-apply every patch
+# in patches/ — covering both the regeneratable 3 and the hand-maintained
+# 8 that share working-tree files.
+$patchedEngineFiles = $expectedPatches.Keys | Where-Object { $_ -ne '.gitignore' }
+
 Step "Reverting patched engine files to HEAD (clean state for pull)"
-foreach ($sourcePath in $enginePatches.Keys) {
+foreach ($sourcePath in $patchedEngineFiles) {
     if (-not (Test-Path $sourcePath)) { continue }
     Invoke-Native git checkout HEAD -- $sourcePath | Out-Null
     if ($LASTEXITCODE -ne 0) {
@@ -380,19 +411,26 @@ if ($pullExit -ne 0) {
     exit $pullExit
 }
 
-Step "Re-applying engine patches (git apply --3way)"
+# Apply every patch on disk, not just the ones we refreshed. Numeric-prefix
+# sort matters: patches 0005-0008 stack on the file 0003 already modified,
+# so 0003 must land first. Get-ChildItem + Sort-Object Name gives us that
+# ordering for free as long as the .patch filenames keep their NNNN- prefix.
+Step "Re-applying engine patches (git apply --3way) from patches/ on disk"
+$allPatches = Get-ChildItem (Join-Path $SetupDir 'patches') -Filter '*.patch' -ErrorAction SilentlyContinue | Sort-Object Name
+if ($allPatches.Count -eq 0) {
+    Err "No .patch files under $SetupDir\patches\ — nothing to re-apply. Engine files are at HEAD-before-pull."
+    Show-RestoreHint
+    exit 1
+}
 $failedPatches = @()
-foreach ($patchPath in $patchesToApply) {
-    if (-not (Test-Path $patchPath)) {
-        Warn "$patchPath disappeared — skipping"
-        continue
-    }
+foreach ($patchFile in $allPatches) {
+    $patchPath = $patchFile.FullName
     $applyOutput = Invoke-Native git apply --3way $patchPath
     $applyOutput | Out-Host
     if ($LASTEXITCODE -ne 0) {
         $failedPatches += $patchPath
     } else {
-        Ok "$patchPath applied"
+        Ok "$($patchFile.Name) applied"
     }
 }
 if ($failedPatches.Count -gt 0) {
@@ -467,7 +505,9 @@ if ($csCount -lt 50) {
 }
 
 Step "Done"
-$newHead = git rev-parse HEAD
+# Last raw git call in the file — route through Invoke-Native for the same
+# EAP=Stop / stderr-as-error rationale as the others above.
+$newHead = (Invoke-Native git rev-parse HEAD | Select-Object -First 1).Trim()
 Ok "HEAD is now $newHead"
 Ok "Next step: .\Bootstrap.bat to download fresh artifacts + rebuild managed projects"
 if ($backupDir) {

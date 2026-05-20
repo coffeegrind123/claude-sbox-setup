@@ -167,8 +167,14 @@ $ErrorActionPreference = 'Continue'
 # We can't just rely on `2>$null` because Windows PowerShell 5.1 still hoists
 # the stderr stream into PSes error pipeline regardless of redirection.
 function Invoke-Git {
-    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
-    $out = & git @Args 2>&1
+    # Bind ValueFromRemainingArguments to a name that's NOT $Args. The
+    # automatic $Args variable exists in every function scope already and
+    # binding a typed parameter to that same name is at best confusing
+    # (PowerShell silently uses the typed binding) and at worst breaks
+    # any subsequent reference that expected the automatic. Rename to
+    # $GitArgs.
+    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$GitArgs)
+    $out = & git @GitArgs 2>&1
     return @{ ExitCode = $LASTEXITCODE; Output = ($out | Out-String) }
 }
 
@@ -277,7 +283,13 @@ try {
         # working-tree files (autocrlf=true converts LF->CRLF on checkout
         # but the index stays LF, so an LF patch doesn't context-match the
         # CRLF working tree and `does not match index` fires on --3way).
-        $crlfPatch = Join-Path $env:TEMP ("claude-sbox-" + $p.BaseName + "-crlf.patch")
+        # [System.IO.Path]::GetTempPath() is more reliable than $env:TEMP — it
+        # falls back through the same chain (TMP, TEMP, USERPROFILE, then the
+        # Windows system temp) and always returns a valid path. $env:TEMP can
+        # be empty under SYSTEM service contexts or freshly-spawned non-
+        # interactive shells, in which case the Join-Path here used to produce
+        # "\claude-sbox-...-crlf.patch" rooted at the filesystem drive.
+        $crlfPatch = Join-Path ([System.IO.Path]::GetTempPath()) ("claude-sbox-" + $p.BaseName + "-crlf.patch")
         $content = [System.IO.File]::ReadAllText($p.FullName)
         # First normalise any pre-existing CRLF back to LF so we don't
         # produce mixed endings, then convert every LF to CRLF wholesale.
