@@ -155,7 +155,13 @@ foreach ($entry in $patchedFiles.GetEnumerator()) {
     # `git diff <path>` outputs the working-tree-vs-HEAD diff for just that
     # file. Empty output means the file matches HEAD = no modification = no
     # patch to write (and we delete a stale .patch if it exists).
-    $diff = & git diff -- $sourcePath
+    #
+    # 2>$null discards git's autocrlf warning ("warning: in the working
+    # copy of '…', LF will be replaced by CRLF the next time Git touches
+    # it") so it doesn't get prepended to the captured patch content.
+    # Without this, the warning becomes the first line of the .patch
+    # file and downstream `git apply` runs see a malformed leading line.
+    $diff = & git diff -- $sourcePath 2>$null
     if ([string]::IsNullOrWhiteSpace($diff)) {
         if (Test-Path $patchPath) {
             Remove-Item $patchPath -Force

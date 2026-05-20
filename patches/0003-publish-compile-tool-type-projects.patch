@@ -1,4 +1,3 @@
-warning: in the working copy of 'engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs', LF will be replaced by CRLF the next time Git touches it
 diff --git a/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs b/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs
 index 62fefd21..61468d6f 100644
 --- a/engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs

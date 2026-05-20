@@ -367,6 +367,14 @@ foreach ($entry in $enginePatches.GetEnumerator()) {
     # file as "no local mods" and silently corrupt the patch on the way
     # out).
     $diff = Invoke-Native git diff -- $sourcePath
+    # Filter out git's autocrlf warnings ("warning: in the working copy of
+    # '…', LF will be replaced by CRLF the next time Git touches it") so
+    # they don't get prepended to the captured patch content. Invoke-Native
+    # merges stderr into stdout to keep the script alive under EAP=Stop,
+    # which means stderr leaks into $diff. Strip those lines before
+    # writing to the .patch file — otherwise downstream `git apply` runs
+    # see a malformed first line and may produce confusing errors.
+    $diff = $diff | Where-Object { $_ -notmatch '^warning:' }
     if ([string]::IsNullOrWhiteSpace(($diff -join "`n"))) {
         # File matches HEAD; no patch needed. If a stale patch exists, leave
         # it alone — the user may have intentionally reverted but kept the
