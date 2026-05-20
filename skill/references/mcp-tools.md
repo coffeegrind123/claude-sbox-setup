@@ -71,7 +71,7 @@ Backed by a **locally-generated schema**: the addon walks the editor's loaded as
 
 | Tool | What it does |
 |---|---|
-| `docs_search(query, limit?)` | BM25 over titles + bodies. Returns `[{path, title, score, snippet}]` plus `source` and `repo_commit` fields. Index is fully populated at startup. |
+| `docs_search(query, limit?, prefetch?)` | BM25 over titles + bodies. Returns `[{path, title, score, snippet}]` plus `source` and `repo_commit` fields. Index is fully populated at startup. `prefetch:true` forces every page in the website manifest to be fetched before searching — only useful when the eager repo tarball failed and the lazy website fetcher is in play. |
 | `docs_get(path)` | Body of a single page. Reads from the repo cache when available; falls back to the website. Returns `source` and `commit` fields so you can cite. |
 | `docs_list` | Every page title + path the manifest knows about. |
 | `docs_refresh` | Refresh both sources in parallel: re-fetch the GitHub tarball if the master SHA changed, and revalidate the website cache with ETag/If-None-Match. |
@@ -79,6 +79,34 @@ Backed by a **locally-generated schema**: the addon walks the editor's loaded as
 The `path` argument is the suffix after `/docs/` in the repo (or after `/dev/doc/` on the website), with `.md` stripped. So `Facepunch/sbox-docs/blob/master/docs/editor/editor-widgets.md` → `editor/editor-widgets`.
 
 **License**: doc page bodies are CC-BY-4.0. When the agent quotes verbatim, the body itself is the attribution-bearing artifact; the `source` and `commit` fields make the citation precise.
+
+## Community tutorials (`learn_*`)
+
+Daily-scraped mirror of the community-written tutorials at [sbox.game/learn](https://sbox.game/learn), published as a markdown tree at [`coffeegrind123/sbox-learn-docs`](https://github.com/coffeegrind123/sbox-learn-docs). Same fetch + cache + BM25 pattern as `docs_*`, just pointing at a different repo and exposing faceted filters since these pages carry rich metadata (difficulty, topic, content type, tags) that the Facepunch docs don't.
+
+**Why it exists**: sbox.game is a Blazor Server SPA — tutorial bodies are streamed over SignalR after the empty HTML shell loads, so a raw HTTP scraper sees nothing. The mirror is built by a Python+Camoufox script on GitHub Actions (06:00 UTC daily); the addon just downloads the tarball and indexes it, the same way `DocsRepoCache` consumes `Facepunch/sbox-docs`.
+
+**When to reach for `learn_*` vs. `docs_*`:**
+
+- `docs_*` for **first-party Facepunch docs** (API guides, lifecycle, networking semantics). Authoritative.
+- `learn_*` for **community walkthroughs** ("how do I set up jigglebones", "porting a Source map", "IDE setup", "displaying a networked variable in UI"). Tagged with difficulty + topic so you can ask for beginner-only or networking-only.
+
+Each tutorial carries YAML frontmatter: `title`, `slug`, `url`, `author`, `author_slug`, `difficulty` (Beginner / Capable / Expert), `topic` (Editor / UI / Networking / Mapping / Coding / Physics / …), `content_type` (Text / Video), `tags[]`, `rating` (1–5 stars from listing card), `views`, `upvotes`, `downvotes`, `updated`, `summary`, `scraped_at`. `learn_get` returns each frontmatter field as a top-level property of the response plus the body markdown.
+
+| Tool | What it does |
+|---|---|
+| `learn_search(query?, difficulty?, topic?, content_type?, author?, tags?, limit?)` | BM25 over title (×4) + tags (×2) + summary (×2) + body. Returns ranked `[{path, title, score, difficulty, topic, content_type, author, tags, rating, views, url, snippet}]` plus the mirror's commit SHA. **Either `query` OR at least one facet filter is required** — empty-string with no filter is rejected. With facets but no query, falls back to a community-signal score (`rating × 10 + log(views) + upvotes − downvotes`) so "give me a beginner networking tutorial" works without keywords. |
+| `learn_get(path)` | Fetch a single tutorial by `<author>/<slug>` path (e.g. `frxxks/beginner-resources`). Returns frontmatter fields + the markdown body. |
+| `learn_list` | Every tutorial with its full metadata. Cheap; useful when the agent wants to enumerate by facet without searching. |
+| `learn_refresh` | Re-fetch the mirror tarball (single GitHub API call to compare SHA, only re-downloads if changed) and rebuild the BM25 index. Use when you suspect tutorials have changed since editor boot. |
+
+**Calling pattern** for "find me a beginner UI tutorial":
+
+```json
+{ "difficulty": "Beginner", "topic": "UI", "limit": 5 }
+```
+
+**License**: scraped content is treated as CC-BY-4.0. Each tutorial's `url` field is the canonical attribution target (the original sbox.game/learn page by the named author).
 
 ## Hosted structured docs (`sdocs_*`)
 

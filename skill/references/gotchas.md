@@ -132,6 +132,16 @@ they don't know to expect them.
   first to see whether `OnMousePress` / `OnMouseMove` /
   `OnMouseRelease` are public on the concrete runtime type.
   Sliders and scrollbar handles work; some custom controls do not.
+- `learn_search` rejects an empty/missing `query` *only* when no
+  facet filter is also supplied. The combination "empty query + at
+  least one of `difficulty`/`topic`/`content_type`/`author`/`tags`"
+  is the intended shape for "give me a beginner networking
+  tutorial" — the handler falls back to a community-signal score
+  (`rating × 10 + log(views) + upvotes − downvotes`) to rank inside
+  the filter set. If you forget the filter, expect a 400
+  `bad_request` with the message "must provide either 'query' or at
+  least one facet filter". This is opposite to `docs_search`, which
+  requires `query` unconditionally.
 - `bootstrap_engine` with stage `engine` fails while the editor is
   running because `bin/managed/*.dll` are file-locked by the live
   process. The `shaders` and `content` stages are safe with the
