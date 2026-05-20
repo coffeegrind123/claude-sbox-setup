@@ -2,11 +2,20 @@
 
 Setup scripts, engine patches, Claude Code companion skill, MCP bridge, and reference docs for the **claude-sbox** s&box editor addon ([sbox.game/ghage/claude-sbox](https://sbox.game/ghage/claude-sbox)).
 
-The addon itself is a compiled tool package published to sbox.game. This repo holds everything around it: the engine patches that have to be applied to the sbox-public tree, the `.bat` / `.ps1` helpers, the companion `sbox-live` Claude Code skill, the Node MCP bridge, and the package marketing assets.
+The addon itself is a compiled tool package published to sbox.game. This repo holds everything around it: the engine patches that have to be applied to the sbox-public tree, the `.bat` / `.ps1` / `.sh` helpers (Windows + Linux), the companion `sbox-live` Claude Code skill, the Node MCP bridge, and the package marketing assets.
 
 ---
 
 ## Quick start
+
+claude-sbox supports two host OSes:
+
+- **Windows** — Facepunch's official [sbox-public](https://github.com/Facepunch/sbox-public). Default path; everything below uses `.bat`/`.ps1`.
+- **Linux** — the community [joshuascript/sbox-public](https://github.com/joshuascript/sbox-public) fork. Adds an Anvil-based native-patch layer (LD_PRELOAD shims for case-insensitive filesystem + Vulkan crash fixes) so the engine runs without Proton. Use the `.sh` siblings of every setup script.
+
+Pick your track below.
+
+### Windows quick start
 
 You need a working [sbox-public](https://github.com/Facepunch/sbox-public) checkout (`git clone --recursive https://github.com/Facepunch/sbox-public`).
 
@@ -41,6 +50,59 @@ package_install ghage.claude-sbox tools
 That's the one-time install step. Patch 0004 (the cloud auto-mount) snapshots the downloaded package files into `<sbox-public>/game/.sbox-global/cloud/.bin/`. From here on, every editor restart on every project automatically copies that global snapshot back into the per-project cache before mounting — no redownload, works offline.
 
 The in-editor MCP host comes up automatically on `http://127.0.0.1:6790`.
+
+### Linux quick start
+
+You need the joshuascript Linux fork of sbox-public, plus `gcc` (for compiling Anvil's native patches), `python3` (for crash analysis tools), and the .NET 10 SDK.
+
+**1. Clone the Linux fork:**
+
+```sh
+git clone https://github.com/joshuascript/sbox-public.git
+cd sbox-public
+```
+
+**2. Run the fork's bootstrap. This installs [Anvil](https://github.com/joshuascript/anvil) (the LD_PRELOAD shim layer the engine needs on Linux) and builds the managed artifacts:**
+
+```sh
+bash bootstrap
+```
+
+When it prompts `Build managed artifacts now? [y/N]`, answer **y**.
+
+**3. Clone this setup repo and apply the engine patches:**
+
+```sh
+cd game/addons/
+git clone https://github.com/coffeegrind123/claude-sbox-setup.git
+cd claude-sbox-setup
+./Setup.sh
+./Bootstrap-And-Capture.sh
+```
+
+`Setup.sh` applies the same 11 engine patches the Windows path uses (cross-platform `git diff` files, no `.bat`-specific content). `Bootstrap-And-Capture.sh` wraps the fork's `bash bootstrap` script with file-lock detection (via `lsof +D`, rare on Linux) and log capture.
+
+**4. Launch the editor via Anvil's wrapper (NOT the `sbox-dev` binary directly — Anvil sets up the LD_PRELOAD chain):**
+
+```sh
+bash ../../../anvil/launch/launch-sbox.sh
+```
+
+Open any project, open the developer console, and run **once, ever**:
+
+```
+package_install ghage.claude-sbox tools
+```
+
+The in-editor MCP host comes up on `http://127.0.0.1:6790` — same as Windows.
+
+#### What's different on Linux
+
+- **Setup scripts**: every `.bat` / `.ps1` has a `.sh` sibling with the same flag names (`--dry-run`, `--force`, `--no-backup`, `--snapshot`, etc.). Procedure semantics are identical.
+- **Bootstrap**: the joshuascript fork ships a `bootstrap` script (no extension) instead of `Bootstrap.bat`. Both wrap `SboxBuild.csproj` so the actual build is identical.
+- **Snapshots**: written as `.tar.gz` instead of `.zip` (smaller + native tooling). `Restore-From-Backup.sh` reads both formats so cross-platform snapshot recovery works.
+- **Terminal dock widget**: the embedded shell uses libutil `forkpty(3)` on Linux instead of ConPTY. Same UX, native PTY.
+- **Cloud-package install**: same `package_install ghage.claude-sbox tools` in the developer console. The package itself is platform-agnostic .NET assemblies; only the engine + Anvil shims differ.
 
 ### Connecting Claude Code
 
@@ -102,6 +164,8 @@ Setup applies eleven patches to your sbox-public tree (all reversible, all shipp
 ### Routine update procedure
 
 Three independent moving parts: the engine (`sbox-public`), the setup tooling (this repo), and the addon itself (mounted via the editor's package system). Update them in this exact order so each step uses the freshest version of whatever it depends on.
+
+**Linux users**: the same procedure applies, but substitute `./Script.sh` for every `.\Script.bat`/`.ps1` invocation below — same flags, same outputs, same recovery commands. Path separators flip from `\` to `/`. Pre-flight item 1 (closing the editor) is still required on Linux to release file handles, even though Linux's file locks are less aggressive than Windows'.
 
 #### Pre-flight
 
