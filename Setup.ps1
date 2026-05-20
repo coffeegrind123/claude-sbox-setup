@@ -431,7 +431,13 @@ try {
         # Bracketed so we can find + idempotently update the block on re-runs
         # without duplicating lines or stomping unrelated edits.
         $giPath = Join-Path $sboxRoot '.gitignore'
-        $beginMarker = '# >>> claude-sbox (managed block — do not edit between markers) >>>'
+        # ASCII-safe markers — PowerShell on Windows double-encodes non-ASCII
+        # chars on .gitignore writes (UTF-8 em-dash bytes get re-encoded as
+        # CP1252 then back to UTF-8), so the canonical em-dash version in
+        # this script wouldn't byte-match the file on subsequent re-runs and
+        # we'd write duplicate managed blocks. Plain `--` avoids the trap
+        # and matches what Setup.sh writes on Linux.
+        $beginMarker = '# >>> claude-sbox (managed block -- do not edit between markers) >>>'
         $endMarker   = '# <<< claude-sbox <<<'
         $blockBody = @(
             $beginMarker
