@@ -116,6 +116,11 @@ git status engine/
 #    If anything shows up, commit / stash / discard before continuing
 #    — Safe-Pull's auto-stash works for .gitignore but won't recover
 #    arbitrary engine-source mods you forgot about.
+
+#    To discard everything under engine/ unconditionally (reset both
+#    the index and the working tree to upstream HEAD, including any
+#    unmerged-conflict files):
+#        git checkout HEAD -- engine/
 ```
 
 #### Update tooling FIRST
