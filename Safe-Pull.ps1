@@ -203,7 +203,20 @@ if ($missing.Count -gt 0) {
     Warn "Tracked patches missing or modified:"
     $missing | ForEach-Object { Warn "  - $_" }
     if (-not $Force) {
-        Err "Aborting. Run with -Force to proceed anyway, or restore the patches first."
+        Err "Aborting — engine is not in a known-patched state."
+        Err ""
+        Err "Most likely cause: you've never run Setup, OR you ran"
+        Err "  ``git checkout HEAD -- engine/``  somewhere along the way and"
+        Err "wiped the applied patches. Fix:"
+        Err ""
+        Err "    .\Setup.bat"
+        Err ""
+        Err "Setup is idempotent — already-applied patches are skipped, and"
+        Err "missing ones (the case here) are re-applied. Once it finishes,"
+        Err "Safe-Pull will pass this check."
+        Err ""
+        Err "If you genuinely want to pull anyway (you removed a patch on"
+        Err "purpose and the marker is stale), re-run Safe-Pull with -Force."
         exit 1
     }
     Warn "Proceeding with -Force despite missing patches."

@@ -118,6 +118,11 @@ cd <sbox-public>\game\addons\claude-sbox-setup
 #    verifier reports markers missing OR finds an unrelated tracked
 #    change in engine/, fix that BEFORE running Safe-Pull for real.
 #
+#    Most common case: markers missing because Setup was never run
+#    on this clone, or `git checkout HEAD -- engine/` discarded the
+#    applied patches. Fix is:  .\Setup.bat  (idempotent, re-applies
+#    only what's missing).
+#
 #    NOTE: a healthy post-Setup tree DOES have 6 modified files
 #    under engine/ — those are the applied patches and you want to
 #    keep them. The thing to watch out for is OTHER changes mixed
