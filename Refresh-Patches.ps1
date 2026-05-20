@@ -12,8 +12,21 @@
 
     Run this script whenever you've made or changed a local edit to one of
     the engine files in `$patchedFiles` below — it regenerates all patches
-    so they reflect the working-tree state. The `.gitignore` is NOT in this
-    list (it's small + append-only, kept in stash by Safe-Pull instead).
+    so they reflect the working-tree state. The sbox-public-root `.gitignore`
+    is NOT in this list:
+      - Its managed `# >>> claude-sbox >>> ... # <<< claude-sbox <<<` block is
+        written idempotently by Setup.ps1 (one-shot at install / re-run).
+      - Safe-Pull.ps1 stashes any remaining `.gitignore` mods across pulls.
+    So no per-pull regen is needed for it.
+
+    `$patchedFiles` doesn't cover every patch on disk — patches 0005-0008
+    (Utility.Projects.Compile.cs multi-block) and 0011 (StartupLoadProject.cs
+    second block) are hand-maintained because we can't regenerate multiple
+    patches against the same working-tree file from a single ordered map.
+    They live under `patches/` directly; edit them in place if their content
+    needs to change. The self-test at the bottom of this script runs
+    `git apply --check` against EVERY .patch in the dir, so hand-maintained
+    ones still get verified.
 
     Adding a new engine modification:
       1. Edit the engine file as usual.
@@ -191,10 +204,17 @@ if ($paths.Count -eq 0) {
 # Stash just the patched files so the rest of the working tree is untouched.
 & git stash push -m $tempStash -- @paths | Out-Null
 
+# Self-test every .patch file on disk, not just the entries in $patchedFiles.
+# Patches 0005-0008 + 0011 are hand-maintained against files that ARE in
+# $patchedFiles (they multiplex two modifications onto one working-tree file)
+# — so the stash above already covers them, but the previous version of this
+# loop iterated $patchedFiles directly and silently skipped checking the hand-
+# maintained patches. A malformed 0006.patch would slip through every self-test
+# until Safe-Pull tried to apply it in production and failed for a user.
 $failed = @()
-foreach ($entry in $patchedFiles.GetEnumerator()) {
-    $patchPath = Join-Path $PatchesDir $entry.Value
-    if (-not (Test-Path $patchPath)) { continue }
+$allPatches = Get-ChildItem $PatchesDir -Filter '*.patch' -ErrorAction SilentlyContinue | Sort-Object Name
+foreach ($patchFile in $allPatches) {
+    $patchPath = $patchFile.FullName
     $check = Invoke-Native git apply --check $patchPath
     if ($LASTEXITCODE -ne 0) {
         $failed += [pscustomobject]@{ Patch = $patchPath; Error = $check }

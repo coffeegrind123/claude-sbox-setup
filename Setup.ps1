@@ -365,6 +365,67 @@ try {
         Write-Host "==> Dry run complete. No files changed." -ForegroundColor Cyan
     } else {
         Write-Host "==> Done. $appliedCount applied, $skippedCount already in place." -ForegroundColor Cyan
+
+        # ---------------------------------------------------------------------
+        # Write the managed `.gitignore` block. Two things this gives us:
+        #   1. `.claude-sbox/` (the addon's on-disk cache root for docs / docs-
+        #      repo / learn-repo / schema) gets git-ignored. The repo's existing
+        #      allowlist-style `.gitignore` already excludes it by default, but
+        #      naming it here is documentation-as-config — a future contributor
+        #      reading `.gitignore` understands why those dirs exist.
+        #   2. `.backups/` (Snapshot-Now's output dir at the setup-repo root)
+        #      gets git-ignored. Safe-Pull.ps1's docstring already claims this
+        #      exclusion exists but nothing previously wrote it.
+        #   3. A literal `claude-sbox` substring lands somewhere in the file,
+        #      which is the marker Safe-Pull.ps1 checks for as proof that
+        #      Setup ran. Without this marker, fresh installs fail Safe-Pull's
+        #      pre-pull verification with "tracked patches missing or
+        #      modified: .gitignore (marker not found)".
+        # Bracketed so we can find + idempotently update the block on re-runs
+        # without duplicating lines or stomping unrelated edits.
+        $giPath = Join-Path $sboxRoot '.gitignore'
+        $beginMarker = '# >>> claude-sbox (managed block — do not edit between markers) >>>'
+        $endMarker   = '# <<< claude-sbox <<<'
+        $blockBody = @(
+            $beginMarker
+            '# Local addon cache (BM25 indexes, docs tarball, learn-mirror tarball, schema dumps).'
+            '.claude-sbox/'
+            ''
+            '# Snapshot output from Snapshot-Now.ps1 / Safe-Pull.ps1 auto-snapshots.'
+            'game/addons/claude-sbox-setup/.backups/'
+            $endMarker
+        ) -join "`n"
+
+        if (-not (Test-Path $giPath)) {
+            # Brand new checkout with no .gitignore is rare but defensively
+            # handled — create the file with just our block.
+            [System.IO.File]::WriteAllText($giPath, $blockBody + "`n", (New-Object System.Text.UTF8Encoding $false))
+            Write-Host ""
+            Write-Host "==> Wrote managed block to a new .gitignore at $giPath" -ForegroundColor Cyan
+        }
+        else {
+            $existing = [System.IO.File]::ReadAllText($giPath)
+            if ($existing -match [regex]::Escape($beginMarker) -and $existing -match [regex]::Escape($endMarker)) {
+                # Replace the existing managed block in-place. Lets us bump the
+                # body content on Setup re-runs without leaving stale lines.
+                $pattern = [regex]::Escape($beginMarker) + '[\s\S]*?' + [regex]::Escape($endMarker)
+                $replacement = $blockBody -replace '\$', '$$$$'   # escape $ for [regex]::Replace
+                $updated = [regex]::Replace($existing, $pattern, $replacement)
+                if ($updated -ne $existing) {
+                    [System.IO.File]::WriteAllText($giPath, $updated, (New-Object System.Text.UTF8Encoding $false))
+                    Write-Host ""
+                    Write-Host "==> Refreshed managed claude-sbox block in $giPath" -ForegroundColor DarkGray
+                }
+            }
+            else {
+                # First-time append. Ensure trailing newline before our block.
+                $sep = if ($existing.EndsWith("`n")) { "`n" } else { "`n`n" }
+                [System.IO.File]::AppendAllText($giPath, $sep + $blockBody + "`n", (New-Object System.Text.UTF8Encoding $false))
+                Write-Host ""
+                Write-Host "==> Appended managed claude-sbox block to $giPath" -ForegroundColor Cyan
+            }
+        }
+
         Write-Host ""
         Write-Host "Next steps:"
         Write-Host "  1. From this directory, run: .\Bootstrap-And-Capture.bat"
