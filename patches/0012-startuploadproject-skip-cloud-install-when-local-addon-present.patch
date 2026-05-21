@@ -1,0 +1,40 @@
+diff --git a/engine/Sandbox.Tools/StartupLoadProject.cs b/engine/Sandbox.Tools/StartupLoadProject.cs
+--- a/engine/Sandbox.Tools/StartupLoadProject.cs
++++ b/engine/Sandbox.Tools/StartupLoadProject.cs
+@@ -178,14 +178,30 @@
+ 			// is a no-op when toolbase happens to be mounted earlier already.
+ 			await PackageManager.InstallAsync( new PackageLoadOptions( "local.toolbase", "tools" ) );
+ 
+-			await PackageManager.InstallAsync( new PackageLoadOptions( "ghage.claude-sbox", "tools" ) );
++			// claude-sbox -- local development sideload. When a local addon directory
++			// exists at game/addons/claude-sbox/ with a matching .sbproj, the developer
++			// is iterating on the addon source directly. Skip the cloud install so the
++			// local Project.SyncWithPackageManager() pass downstream mounts the working
++			// tree instead of the published .cll. Without this skip the cloud package
++			// "wins" the timing race and the developer's edits are invisible until they
++			// publish a new version.
++			var localAddonSbproj = System.IO.Path.Combine( sboxGameRoot, "addons", "claude-sbox", ".sbproj" );
++			bool localAddonPresent = System.IO.File.Exists( localAddonSbproj );
++			if ( !localAddonPresent )
++			{
++				await PackageManager.InstallAsync( new PackageLoadOptions( "ghage.claude-sbox", "tools" ) );
+ 
+-			System.IO.Directory.CreateDirectory( globalBin );
+-			foreach ( var src in System.IO.Directory.GetFiles( perProjectBin, "package.ghage.claude-sbox.*" ) )
++				System.IO.Directory.CreateDirectory( globalBin );
++				foreach ( var src in System.IO.Directory.GetFiles( perProjectBin, "package.ghage.claude-sbox.*" ) )
++				{
++					var dest = System.IO.Path.Combine( globalBin, System.IO.Path.GetFileName( src ) );
++					if ( !System.IO.File.Exists( dest ) || new System.IO.FileInfo( src ).Length != new System.IO.FileInfo( dest ).Length )
++						System.IO.File.Copy( src, dest, overwrite: true );
++				}
++			}
++			else
+ 			{
+-				var dest = System.IO.Path.Combine( globalBin, System.IO.Path.GetFileName( src ) );
+-				if ( !System.IO.File.Exists( dest ) || new System.IO.FileInfo( src ).Length != new System.IO.FileInfo( dest ).Length )
+-					System.IO.File.Copy( src, dest, overwrite: true );
++				Log.Info( "[claude-sbox] local addon at game/addons/claude-sbox/ detected — skipping cloud install, local source will be used" );
+ 			}
+ 		}
+ 		catch ( System.Exception e )
