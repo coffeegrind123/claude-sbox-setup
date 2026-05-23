@@ -134,6 +134,27 @@ Override the base URL via env var on the editor process (highest priority), `gam
 - `docs_*` for the "I want a paragraph about X" narrative. Local; BM25 over Markdown.
 - `sdocs_*` for "I have a concept and want both ranked symbol hits AND example/guide leads in one call". Hosted; richer per-method metadata than `schema_*`; richer ranking than local BM25.
 
+### Layered query recipe
+
+Each surface answers a different question. When researching anything bigger than a single signature lookup, layer them in this order rather than picking one:
+
+| Step | Goal | Tool(s) | When to skip |
+|---|---|---|---|
+| 1. Ground | Confirm the symbol exists in *this* build; pin the canonical FQN | `schema_search_members(query)` or `schema_lookup_type(fqn)`; `reflection_get_type_hierarchy(fqn)` if you need bases/subclasses | Editor not connected → start at step 3 (local prose). |
+| 2. Shape | Per-parameter docs, return type, overload details, example wiring | `sdocs_search_docs(query)` → `sdocs_get_method_details(id)` → `sdocs_get_examples(id, includeRelated:true)` | Symbol came from private project source (privacy: queries leave the machine) → use `schema_signature` + grep the prose docs. |
+| 3. Narrative | Workflow / semantics / "why does this behave this way" | `docs_search(query)` → `docs_get(path)`; or `sdocs_get_related_guides(id)` once you have the FQN | Question is just "what does this method return" — step 2 already answered it. |
+| 4. Community | Worked end-to-end examples or video walkthroughs | `learn_search(query)` or facet-driven `learn_search(topic: "...", difficulty: "Beginner")` | First-party prose at step 3 covers it. |
+
+**Common single-step shortcuts** (don't run the whole pipeline when the question is narrow):
+
+- *"What's the signature of `Component.OnUpdate`?"* → step 1 alone.
+- *"Explain RPC ownership"* → step 3 alone (`docs_search("RPC ownership")`).
+- *"What types implement `IScenePhysicsEvents`?"* → step 1 with `reflection_get_type_hierarchy`.
+- *"Show me a Razor reactivity example"* → step 2 (`sdocs_search_docs("razor reactivity")` → `_get_examples`).
+- *"Beginner UI tutorial"* → step 4 alone with facets.
+
+**Provenance note**: results from step 1 reflect the running editor's loaded assemblies (fingerprint via `schema_freshness`); results from step 2 hit `sdocs.suiram.dev` (hosted, snapshot whatever it was last indexed against); results from steps 3 + 4 read locally-cached repo tarballs (`docs_refresh` / `learn_refresh` to revalidate). When the layers disagree on a signature, trust step 1.
+
 ## Project / addon (`get_active_project`, `list_*`)
 
 | Tool | What it does |

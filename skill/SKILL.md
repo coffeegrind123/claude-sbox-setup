@@ -13,6 +13,15 @@ When you're in an s&box context, you have access to **three ground-truth pipelin
 2. **Live prose docs**: two sibling pipelines, both cached + BM25-indexed by the MCP server. Use `docs_*` for **first-party Facepunch documentation** (Facepunch/sbox-docs repo, CC-BY-4.0, with `sbox.game/llms.txt` as fallback) — the authoritative usage docs for the engine and editor. Use `learn_*` for **community tutorials** (daily mirror of sbox.game/learn at `coffeegrind123/sbox-learn-docs`) — walkthroughs and how-tos written by other s&box developers, with rich faceted metadata (difficulty, topic, content_type, tags) you can filter on.
 3. **Hosted structured docs** (`sdocs_*`): third-party Meilisearch proxy at `sdocs.suiram.dev` exposing 9 tools for symbol resolution, per-method overload details, examples, and related guides. Distinct from `docs_*`: returns structured per-symbol metadata + ranked hits + per-method per-parameter type/doc breakdowns. **Queries leave the machine**: for symbol names lifted from private project source, prefer `schema_*` + `docs_*`. See `references/mcp-tools.md` § Hosted structured docs and gotchas.
 
+**Recommended docs-query layering** (default; deviate when the user already pinned a layer):
+
+1. **Ground first** with `schema_search_members(query)` or `schema_lookup_type(fqn)` — confirms the symbol actually exists in *this* build and pins the canonical FQN. If `connected=false`, skip to step 3 (local prose still works).
+2. **Get usage shape** with `sdocs_search_docs(query)` → `sdocs_get_method_details(id)` for per-parameter docs/return types, plus `sdocs_get_examples(id, includeRelated:true)` when the agent needs to see how the call is wired. Skip if the symbol came from private project source (privacy: queries leave the machine).
+3. **Get the narrative** with `docs_search(query)` → `docs_get(path)` for first-party prose (lifecycle, RPC semantics, networking visibility rules, etc.). Use `sdocs_get_related_guides(id)` instead when you already have an FQN — it cross-links the symbol back to the prose page.
+4. **Fall back to community** with `learn_search(query)` or `learn_search(topic: "...", difficulty: "Beginner")` when official docs don't cover the question. Faceted; use empty query + filter for "highest-rated in this topic".
+
+Shortcut: for a one-line concept ("RPC visibility rules") skip 1 and start at 3. For verifying a method call you're about to write, run 1 alone — schema is ground truth.
+
 You also have **live editor introspection + drive** when the editor is running and the bridge is connected:
 
 4. **Editor mode + state**: `editor_state` is a one-call snapshot of mode (edit/play/paused), scene state, project, multiplayer status, filesystem scopes, dispatcher metrics, and capability flags. **Call this first** when you don't know what state the editor is in; gate any mode-dependent tool on its result.
@@ -64,6 +73,7 @@ If `sbox_status` reports `connected=false`, the editor isn't running or the brid
 | Driving a tab page widget | Call `tab_list_pages` then `tab_select` |
 | Filling an inspector input that doesn't have a `[Property]` (custom widget, popup dialog) | Call `set_input_text` / `set_color` / `set_checkbox` / `set_slider_value` / `select_dropdown_option`; `set_widget_value` for universal "I don't know the type"; `inspect_widget` to discover surface first |
 | The exact signature of a method, property, field | Don't read a file: call `schema_signature` |
+| Researching a symbol or API you're about to call (full pipeline) | Layer the queries: `schema_search_members` → `sdocs_search_docs` → `sdocs_get_method_details` + `sdocs_get_examples` → `docs_search`/`sdocs_get_related_guides` → `learn_search` as a fallback. See top-of-file recipe. |
 | How to use a system (RPC, Razor, Editor Tools, Hammer) | Don't read a file: call `docs_search` then `docs_get`; or `sdocs_search_docs` for ranked structured hits + `sdocs_get_related_guides` for workflow pages |
 | "Show me how someone built X" / a beginner walkthrough / a community tutorial | Don't read a file: call `learn_search(query)` or `learn_search(difficulty: "Beginner", topic: "UI")`. Faceted; tutorials carry difficulty / topic / tags / rating. Pair with `learn_get(path)` for the body. |
 | Disambiguating a short type name to a fully-qualified one | Don't read a file: call `sdocs_resolve_symbol` (hosted) or `schema_search_members` (local) |
