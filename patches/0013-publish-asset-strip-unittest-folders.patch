@@ -1,0 +1,24 @@
+diff --git a/engine/Sandbox.Tools/Utility/ProjectPublisher/PackageManifest.cs b/engine/Sandbox.Tools/Utility/ProjectPublisher/PackageManifest.cs
+index b0d431ca..8eee92b4 100644
+--- a/engine/Sandbox.Tools/Utility/ProjectPublisher/PackageManifest.cs
++++ b/engine/Sandbox.Tools/Utility/ProjectPublisher/PackageManifest.cs
+@@ -476,6 +476,19 @@ public partial class ProjectPublisher
+ 			if ( file.Contains( "_bakeresourcecache", StringComparison.OrdinalIgnoreCase ) ) return false;
+ 			if ( file.Contains( "launchsettings.json", StringComparison.OrdinalIgnoreCase ) ) return false;
+ 
++			// claude-sbox -- local engine modification. Parallel to the code-side
++			// `unittest` exclusion added to CompilerConfiguration.IgnoreFolders by
++			// patch 0003 (engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs:
++			// `compilerSettings.IgnoreFolders.Add( "unittest" )`). The code-side
++			// exclusion strips .cs files in /unittest/ folders from the compiled
++			// .cll at publish time; this asset-side parallel strips fixture assets
++			// (test scenes/prefabs/models/etc.) from the published .vpk so addon
++			// authors can keep test fixtures under Assets/unittest/... and end
++			// users never see them in the cloud-distributed package. Without this,
++			// the addon ships a fully-stripped .cll (no test handlers) but the
++			// fixture assets still ride along in the asset bundle.
++			if ( file.Contains( "/unittest/", StringComparison.OrdinalIgnoreCase ) ) return false;
++
+ 			if ( !allowSourceFiles )
+ 			{
+ 				if ( file.Contains( ".sbproj", StringComparison.OrdinalIgnoreCase ) ) return false;
