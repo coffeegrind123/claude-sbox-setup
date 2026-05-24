@@ -82,6 +82,14 @@ declare -A EXPECTED_PATCHES=(
     ["engine/Sandbox.Tools/StartupLoadProject.cs"]=".sbox-global"
     ["engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs"]='Package.TypeName == "tool"'
     ["engine/Sandbox.Engine/Services/Packages/PackageManager/PackageLoader.cs"]='Extend the "tool assemblies'
+    # Patch 0013 (publish-asset-strip-unittest-folders) touches both
+    # PackageManifest.cs and ProjectPublisher.cs. These MUST be tracked so the
+    # pre-pull revert loop (derived from this map) resets them to HEAD before
+    # stashing -- otherwise patched bytes get stashed alongside .gitignore and
+    # post-pull stash-pop collides with the re-applied patch (same blob hash
+    # on both sides, git refuses on principle).
+    ["engine/Sandbox.Tools/Utility/ProjectPublisher/PackageManifest.cs"]='file.Contains( "/unittest/"'
+    ["engine/Sandbox.Tools/Utility/ProjectPublisher/ProjectPublisher.cs"]='a.AbsolutePath.Contains( "/unittest/"'
 )
 
 # ───────────────────────── Pre-pull verification ─────────────────────────

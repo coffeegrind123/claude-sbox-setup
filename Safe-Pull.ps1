@@ -160,6 +160,8 @@ $expectedPatches = @{
     'engine/Sandbox.Tools/StartupLoadProject.cs' = '.sbox-global'
     'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs' = 'Package.TypeName == "tool"'
     'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageLoader.cs' = 'Extend the "tool assemblies'
+    'engine/Sandbox.Tools/Utility/ProjectPublisher/PackageManifest.cs' = 'file.Contains( "/unittest/"'
+    'engine/Sandbox.Tools/Utility/ProjectPublisher/ProjectPublisher.cs' = 'a.AbsolutePath.Contains( "/unittest/"'
     # Utility.Projects.Compile.cs is touched by patch 0003 (which now consolidates
     # what used to be patches 0003-0008 -- five distinct blocks against the same
     # publish-compile file). The marker above covers the type-equality check inside
@@ -167,6 +169,13 @@ $expectedPatches = @{
     # Hashtable can't key multiple entries by the same file path. Acceptable -- the
     # blocks are clustered close together in the file, so an upstream conflict that
     # strips only some of them but leaves the type-equality block intact is unlikely.
+    #
+    # PackageManifest.cs and ProjectPublisher.cs are the two files touched by
+    # patch 0013 (publish-asset-strip-unittest-folders). They MUST be in this
+    # hashtable so $patchedEngineFiles picks them up and the pre-pull revert
+    # loop resets them to HEAD before stashing -- otherwise the patched bytes
+    # get stashed alongside .gitignore and the post-pull stash-pop collides
+    # with the re-applied patch (same blob hash on both sides, git refuses).
 }
 
 # Map: tracked engine file → patches/<file>.patch. The .gitignore is NOT here
