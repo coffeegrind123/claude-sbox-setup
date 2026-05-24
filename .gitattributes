@@ -1,5 +1,59 @@
-# Force LF line endings on .patch files regardless of the client's
-# core.autocrlf setting. `git apply` is whitespace-sensitive in
-# subtle ways; a CRLF-mangled patch file can fail to apply on Windows
-# even when --ignore-whitespace is set.
-*.patch text eol=lf
+# Pin line endings per file type so the working tree stays clean across
+# Linux / WSL / Windows checkouts regardless of any developer's
+# core.autocrlf setting. Without this, the .sh / .bat / .ps1 / .md /
+# .html files in this repo drift to CRLF every time a Windows-side tool
+# (e.g. Refresh-Patches.bat run from cmd) touches them, producing a
+# 22-file dirty tree against the LF-stored canonical content.
+
+# Default: auto-detect text vs binary; any text file normalises to LF
+# in both the index AND the working tree (eol=lf overrides any local
+# core.autocrlf=true setting on checkout).
+* text=auto eol=lf
+
+# ───────────────────── platform-specific scripts ─────────────────────
+
+# Unix shell scripts MUST be LF — a CRLF in the shebang line breaks the
+# kernel's loader (`/usr/bin/env bash\r` doesn't exist on any Linux).
+*.sh text eol=lf
+
+# Windows batch + PowerShell expect CRLF and some tools (older cmd.exe,
+# some PowerShell hosts) misbehave with LF-only files. Pin to CRLF so
+# they always check out the way Windows wants them.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# ───────────────────── source / docs (always LF) ─────────────────────
+
+*.cs       text eol=lf
+*.csproj   text eol=lf
+*.sln      text eol=lf
+*.sbproj   text eol=lf
+*.json     text eol=lf
+*.yaml     text eol=lf
+*.yml      text eol=lf
+*.md       text eol=lf
+*.html     text eol=lf
+*.txt      text eol=lf
+*.config   text eol=lf
+*.xml      text eol=lf
+*.ts       text eol=lf
+*.js       text eol=lf
+*.lock     text eol=lf
+
+# Existing pin (was the only entry before this commit) — `git apply` is
+# whitespace-sensitive and CRLF-mangled patches fail to apply on Windows
+# even with --ignore-whitespace. Keep the explicit eol=lf to be safe
+# against a future regression where the default rule changes.
+*.patch    text eol=lf
+
+# ───────────────────── binary ─────────────────────
+
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.dll  binary
+*.exe  binary
+*.pdb  binary
