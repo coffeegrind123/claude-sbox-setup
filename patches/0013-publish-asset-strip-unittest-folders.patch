@@ -5,7 +5,7 @@ index b0d431ca..8eee92b4 100644
 @@ -476,6 +476,19 @@ public partial class ProjectPublisher
  			if ( file.Contains( "_bakeresourcecache", StringComparison.OrdinalIgnoreCase ) ) return false;
  			if ( file.Contains( "launchsettings.json", StringComparison.OrdinalIgnoreCase ) ) return false;
- 
+
 +			// claude-sbox -- local engine modification. Parallel to the code-side
 +			// `unittest` exclusion added to CompilerConfiguration.IgnoreFolders by
 +			// patch 0003 (engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs:
@@ -22,3 +22,27 @@ index b0d431ca..8eee92b4 100644
  			if ( !allowSourceFiles )
  			{
  				if ( file.Contains( ".sbproj", StringComparison.OrdinalIgnoreCase ) ) return false;
+diff --git a/engine/Sandbox.Tools/Utility/ProjectPublisher/ProjectPublisher.cs b/engine/Sandbox.Tools/Utility/ProjectPublisher/ProjectPublisher.cs
+index aaaaaaaa..bbbbbbbb 100644
+--- a/engine/Sandbox.Tools/Utility/ProjectPublisher/ProjectPublisher.cs
++++ b/engine/Sandbox.Tools/Utility/ProjectPublisher/ProjectPublisher.cs
+@@ -517,6 +517,19 @@ public partial class ProjectPublisher
+ 		if ( a.AbsolutePath.Contains( "/addons/base/assets/shaders/", StringComparison.OrdinalIgnoreCase ) ) return false;
+ 		if ( a.AbsolutePath.Contains( "/core/shaders/", StringComparison.OrdinalIgnoreCase ) ) return false;
+
++		// claude-sbox -- local engine modification. Companion to the /unittest/
++		// rejection added to LooseFileAllowed by patch 0013. CollectAssets ->
++		// AddAsset (PackageManifest.cs:300) bypasses LooseFileAllowed and gates
++		// on CanPublishFile instead, so without this second check any asset
++		// living under <addon>/Assets/unittest/... that the AssetSystem has
++		// indexed (.scene/.prefab/etc. fixtures) still ships in the published
++		// .vpk even though the LooseFileAllowed-protected paths drop it. End
++		// users would see the compiled fixture resources under the published
++		// addon's asset tree -- exactly the leak patch 0013 set out to prevent.
++		// Match the same OrdinalIgnoreCase substring shape as patch 0013 for
++		// consistency.
++		if ( a.AbsolutePath.Contains( "/unittest/", StringComparison.OrdinalIgnoreCase ) ) return false;
++
+ 		return true;
+ 	}
+
