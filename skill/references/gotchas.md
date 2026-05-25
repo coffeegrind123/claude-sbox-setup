@@ -153,6 +153,109 @@ they don't know to expect them.
   only — `bootstrap_engine` shells out to `Bootstrap.bat` at the
   sbox-public root.
 
+## Bridge tool reliability
+
+- `editor_state` can hard-fail with `NotImplementedException: Unable to
+  upgrade delegate methods without declaring types` and **stay broken
+  across an editor restart** (observed on claude-sbox v0.0.109) — it's
+  not a transient hotload blip, it's the handler tripping the engine's
+  hotload upgrader on a delegate it serializes. When this happens,
+  route around it: `get_active_scene` (scene name + source path),
+  `compile_check_build_state` (build state), `ping` (liveness), and
+  `game_action_list` (errors `not_in_play_mode` when stopped, succeeds
+  when playing) together reconstruct everything `editor_state` would
+  have told you. `doctor` also still works.
+- `set_property` only coerces **string-like** values reliably: `string`,
+  `Guid`, and enums-as-string work. **`Vector3` AND `bool` both FAIL** with
+  `coerce_failed: ... requires an element of type 'Object'/'Boolean', but
+  the target element has type 'String'` (the value arrives as a string and
+  the coercer won't convert it). For Vector3 every form was rejected
+  (`{"x":..}`, `"x,y,z"`, `[x,y,z]`); bool `"true"` is rejected too. So you
+  **cannot toggle a `[Property] bool` or set a `Vector3`** from the bridge —
+  drive those from code (a sibling test component, or a `[ConCmd]`), or via
+  the inspector UI. Combined with no input-injection (`send_keys` doesn't
+  reach game input), key-bound toggles aren't bridge-testable; validate
+  their effect by other means (e.g. a mirror/replica object).
+  So you **cannot drive a player's `Velocity`/`WorldPosition` from the
+  bridge** to script a motion test — there's no input-injection path
+  either (`send_keys` posts Qt events the game-input layer ignores).
+  Validate at-rest invariants (grounded, no drift, no fall-through) via
+  `get_property`, and hand dynamic feel tests (WASD/jump/stairs) to the
+  user. If you must move something, a sibling test component that sets
+  the value in code (then hotload) is the workaround.
+- After a burst of source edits, the editor drains a queue of recompiles
+  and the scene can repeatedly re-bootstrap (any self-spawning
+  `OnActive` scene gets new GameObject ids each pass). Targeted
+  `set_property`/`get_property` by id will race this with
+  `gameobject_not_found`. Let compiles settle
+  (`compile_check_build_state` → `any_building:false`) before grabbing
+  ids, and re-list right before you act on them.
+- `wait_for_scene_state(target:"playing")` frequently returns
+  `matched:false` with the `scene.session.save` event instead — the
+  pre-play session save fires first and satisfies the waiter. Don't
+  treat that as "didn't enter play"; confirm with `game_action_list`
+  (or `find_gameobject_by_path` for a runtime-spawned object).
+
+## Cloud assets + mounting
+
+- `asset_mount` must run on the engine **main thread**, which in
+  practice means the editor has to be in **edit mode** — calling it
+  while a scene is playing throws `MountAsync threw: DownloadAndMount
+  must be called on the main thread!`. Stop play first
+  (`auto_Editor_EditorScene_TogglePlay`, confirm via `editor_state`
+  / `game_action_list`), then mount.
+- Mount idents **one at a time**, not in a parallel tool batch.
+  Firing several `asset_mount` calls in one message races the
+  main-thread dispatch and they all fail with the same main-thread
+  error. Serial calls (each awaiting the previous) succeed and each
+  returns the resolved `primary_asset` vmdl/vmat path you then feed to
+  `Model.Load`.
+- `asset_query_state` / `find_asset` only see the **local project
+  Content** scope — they return `asset_not_found` for models that
+  live inside a *mounted cloud package*, even when those models load
+  fine at runtime. Don't treat that as a missing asset. To verify a
+  cloud model resolves, load it at runtime and read it back: enter
+  play, then `get_property(renderer, idx, "Model")` should report
+  e.g. `Model:v_recoillessrifle`. The mount call's `primary_asset`
+  field is the authoritative path.
+- Cloud weapon naming convention (Facepunch `sboxweapons` collection):
+  `v_*` idents are **rigged first-person viewmodels** that ship with
+  an embedded animgraph; bare / `w_*` idents are third-person world
+  models with LODs + collision. Mounting a `v_` ident pins it into the
+  active `.sbproj` `PackageReferences` (with `pin_to_project:true`) so
+  it auto-mounts next session.
+
+## First-person weapons (the sboxweapons animgraph system)
+
+- Bonemerge direction is **arms → onto → weapon**, the opposite of the
+  Source 1 convention. The weapon viewmodel owns the skeleton (it has
+  baked arm + finger + `camera` bones); set the *arms* renderer's
+  `BoneMergeTarget` to the *weapon* renderer, not the reverse. Getting
+  this backwards leaves the hands detached.
+- When using the **citizen** arms (`v_first_person_arms_citizen`), tell
+  the weapon animgraph via `weaponRenderer.Set( "skeleton", 1 )`
+  (0 = human, the default). Skipping this misaligns the hands slightly.
+- Drive everything through `SkinnedModelRenderer.Set( string, value )`
+  overloads (bool / int / float / Rotation / Vector3). Key params:
+  `b_grounded`, `b_jump` (self-resetting), `b_sprint`, `move_bob`
+  (0–1), `b_attack` (self-resetting, also used by melee which auto-
+  chains swings), `b_attack_dry` when empty. Reloading the renderer's
+  `Model` re-inits the animgraph and replays the **deploy** animation —
+  so a weapon swap that sets a new model gives you the draw anim for
+  free.
+- The animated `camera` bone (a root bone on each viewmodel) is meant
+  to **add onto** your in-game camera for recoil/deploy view-kick.
+  Read it with `weaponRenderer.TryGetBoneTransformLocal( "camera", out
+  var tx )`; if the viewmodel object is parented to the camera at
+  identity local transform, `tx` is already in camera-local space, so
+  `cam.WorldPosition += cam.WorldRotation * tx.Position`. Apply it
+  *after* you set the base eye transform or it gets overwritten.
+- Viewmodels are local cosmetic-only: build the renderer hierarchy at
+  runtime (not network-spawned) and gate the owning component on
+  `IsProxy` so remote players never spawn one. Put that component on
+  the **networked root** (where `IsProxy` is meaningful), not on a
+  non-networked child like the camera object.
+
 ## Skeletal animation: blending two sequences on one model
 
 - `SkinnedModelRenderer` plays exactly **one** `Sequence` at a time
