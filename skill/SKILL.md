@@ -57,6 +57,7 @@ If `sbox_status` reports `connected=false`, the editor isn't running or the brid
 - **"is there a tool for Y?"** → grep `references/tool-families.md` first (curated one-liner index over ~597 bridge tools). Reach for `list_tools` only if the family isn't there.
 - **session opener** → call `doctor` once. It returns a structured pass/warn/fail roll-up plus a single `next_suggested_action` so you don't have to ping/sbox_status/compile_check_build_state/list_unsaved_scenes individually.
 - **"do four things in a row"** → use `dispatcher_batch`. Each op runs through the normal dispatcher (own LogCapture window); refer to earlier results via `{"$ref": "alias.path"}`. Saves agent turns and roundtrips.
+- **runtime bug you can't reproduce** (no WASD/mouse injection) → have the user reproduce and freeze in the bad state, then read component fields with `get_property` (ground truth beats guessing). Read a per-tick value like `Velocity` **twice** — if it's byte-identical, that component isn't ticking (disabled / inactive / proxy / paused); `get_components` shows the `enabled` flags. See `references/gotchas.md` "Live runtime debugging".
 
 ## Routing: when to read which file
 
@@ -64,7 +65,7 @@ If `sbox_status` reports `connected=false`, the editor isn't running or the brid
 |---|---|
 | Translating a Unity pattern to s&box | `references/unity-translation.md` |
 | The Ten Rules of s&box (lifecycle, networking, async) | `references/ten-rules.md` |
-| Common gotchas (namespace surprises, signature traps, silent set_property failures, sdocs privacy, auto_* naming, widget_drag rejections) | `references/gotchas.md` |
+| Common gotchas (namespace surprises, signature traps, silent set_property failures, set_property can't coerce bool/Vector3, bone GET=world vs SET=model space, Components.Get skips disabled, live runtime debugging, screenshot location, sdocs privacy, auto_* naming, widget_drag rejections) | `references/gotchas.md` |
 | Bodygroups: hiding/showing body parts on models (e.g. citizen) | `references/bodygroups.md` |
 | Live MCP tools you can call (curated, with usage stories) | `references/mcp-tools.md` |
 | "Is there a tool for X?": discovery index across all ~597 bridge tools | `references/tool-families.md` |
