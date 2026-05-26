@@ -104,6 +104,18 @@ When the user asks you to change a value in the inspector ("set the player speed
 
 When the user asks you to *write* code, prefer `Read`/`Edit`/`Write` against the bind-mounted source tree (your cwd is the s&box project root), then call `recompile` (when implemented) or tell the user to trigger a hot-reload.
 
+## Believe the user about what's on screen
+
+When the user tells you what they observe in the running game — "there is no HUD",
+"the font isn't showing", "the digits are cut off", "it works now" — **treat it as ground
+truth and act on it directly.** Do NOT take screenshots to verify or contradict them. The
+bridge generally **cannot** capture the in-game UI reliably (`screenshot_scene_to_file`
+excludes screen-space panels; widget capture of the 3D viewport returns blank), so a
+screenshot is more likely to mislead than confirm — and re-checking what the user just told
+you wastes their time and erodes trust. Reason about the cause from their description, make
+the fix, and ask them to confirm. Use screenshots only when the user hasn't said what they
+see and you have no other signal — never to second-guess an explicit statement.
+
 ## What you should NOT do
 
 - Don't suggest `MonoBehaviour`, `Awake`, `Start`, `Update`, `[SerializeField]`. See `references/unity-translation.md` for the s&box equivalents.
