@@ -417,6 +417,12 @@ they don't know to expect them.
   (`<sbox>/game/screenshots/sbox.<timestamp>.png`), NOT the project dir.
   Find it with `host_list_directory(scope:"game_root", path:"screenshots",
   glob:"*.png")`, newest mtime, then `Read` the absolute host path.
+- **`screenshot_scene_to_file` renders the camera only — it does NOT include screen-space UI**
+  (`ScreenPanel`/HUD panels). And `widget_capture_to_png` of the 3D viewport
+  (`Editor.SceneRenderingWidget`) comes back blank (it's a GPU swapchain Qt can't grab), and its
+  `save_to` is a path on the *editor host* (Windows here), not the agent's FS. Upshot: **you cannot
+  screenshot the in-game HUD.** Don't try to verify UI work with a screenshot — see SKILL.md
+  "Believe the user about what's on screen".
 - `wait_for_scene_play` frequently returns `expired:true` even though Play
   *did* start (the event races the TogglePlay call). Don't trust the wait —
   verify by `list_gameobjects` (runtime objects like the spawned Player
@@ -499,6 +505,22 @@ they don't know to expect them.
   tweaks). Right after a TogglePlay the bridge can still report only the edit scene — re-query a
   beat later. This is the reliable way to capture "bake my current tweaks as defaults".
 
+## A HUD PanelComponent renders NOTHING without a ScreenPanel root
+
+A `PanelComponent` (your Razor HUD) only renders if `FindParentPanel()` finds an
+`IRootPanelComponent` — i.e. a **`ScreenPanel`** (screen-space) or `WorldPanel` — on the *same
+GameObject* or an ancestor. With no root, `panel.Parent` is null and the whole HUD is invisible —
+**but its `OnUpdate`/lifecycle still runs**, so it looks "alive" (logs fire, state updates) while
+drawing nothing. Classic head-scratcher: "the HUD code runs but I see no HUD."
+
+- Fix in code so it can't break: in the HUD's `OnEnabled`, `Components.GetOrCreate<ScreenPanel>();`.
+  `ScreenPanel.OnEnabled` calls `EnsureParentPanel()` on sibling/descendant `PanelComponent`s, so the
+  HUD re-parents to it automatically. This is more robust than wiring the ScreenPanel in the `.scene`.
+- Scene-wiring caveat: a `ScreenPanel` added to the edit scene **via the bridge** (`gameobject_add_component`)
+  did not reliably persist across a Play toggle (and `save_scene` reported "no unsaved changes"). If you
+  must do it in the scene, hand-edit the `.scene` JSON (add the `Sandbox.ScreenPanel` component before
+  the PanelComponent) — but prefer the code route above.
+
 ## UI fonts: you CANNOT register a custom font at runtime from game code
 
 Proven from engine source (`engine/Sandbox.Engine/Systems/Render/TextRendering/FontManager.cs`
@@ -534,13 +556,17 @@ Two ways around it:
    `.ttf` with `Http.RequestBytesAsync` (s&box forces UA `facepunch-sbox` + a Referer and forbids
    overriding them — fine for most hosts; verify your API doesn't UA-filter), parse the `glyf`
    outlines in pure C# (`TrueTypeFont.cs`), fill them with an anti-aliased non-zero-winding scanline
-   rasterizer (`GlyphRasterizer.cs`), pack the glyphs into an RGBA strip, and `Texture.Create(w,h,
-   ImageFormat.RGBA8888).WithData(bytes).Finish()`. Render text as one panel per glyph: same strip as
-   `Style.BackgroundImage`, `BackgroundSizeX` = full strip width, `BackgroundPositionX` =
-   `-(cell*cellWidth)`, `Overflow = Hidden`, `BackgroundRepeat = NoRepeat`, `BackgroundTint` = colour
-   (store glyphs white-alpha so the tint colours them). This gives true on-the-fly fonts (any font,
-   any time, no bundling) at the cost of a glyph rasterizer. Only `Texture.Create` needs the main
-   thread — the parse/raster is plain CPU work that can follow an `await`. Worth it when the glyph
-   set is tiny (HUD digits) and the font is chosen at runtime (e.g. hashed from the player's model).
-   Note CFF/OpenType-PostScript outlines (`CFF `/`CFF2` table, no `glyf`) need a separate Type2
-   charstring interpreter — check your catalogue's sfnt version first.
+   rasterizer (`GlyphRasterizer.cs`), and build a `Texture.Create(w,h,
+   ImageFormat.RGBA8888).WithData(bytes).WithMips().Finish()`. Store glyphs **white-alpha** so
+   `Style.BackgroundTint` can colour them.
+   - **Rasterize each glyph into its OWN texture, displayed whole** (panel `BackgroundSize 100% 100%`,
+     panel aspect == texture aspect). Do NOT pack into one strip and window it with `BackgroundPositionX`
+     + `Overflow:Hidden` — that clips wider glyphs at the cell edge ("digits cut off"). Per-glyph
+     textures can't be clipped. Give each glyph a shared baseline-aligned cell height + a couple px of
+     edge padding so the AA fringe survives.
+   - This gives true on-the-fly fonts (any font, any time, no bundling) at the cost of a glyph
+     rasterizer. Only `Texture.Create` needs the main thread — the parse/raster is plain CPU work that
+     can follow an `await`. Worth it when the glyph set is tiny (HUD digits) and the font is chosen at
+     runtime (e.g. hashed from the player's model).
+   - CFF/OpenType-PostScript outlines (`CFF `/`CFF2` table, no `glyf`) need a separate Type2 charstring
+     interpreter — check your catalogue's sfnt version first. (mixfont's are all `glyf`.)
