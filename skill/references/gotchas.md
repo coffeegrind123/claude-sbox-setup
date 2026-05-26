@@ -255,6 +255,26 @@ they don't know to expect them.
   `IsProxy` so remote players never spawn one. Put that component on
   the **networked root** (where `IsProxy` is meaningful), not on a
   non-networked child like the camera object.
+- **Viewmodel clips into the camera ("I can see through it").** The
+  `CameraComponent` default `ZNear` is **10**, which culls the close
+  first-person geometry. Lower the *main* camera's `ZNear` (~1). Keep
+  the viewmodel in the **main camera** so its shading is unchanged.
+- **Don't "fix" clipping with a separate depth-clearing viewmodel
+  camera unless you replicate post-processing.** A second
+  `CameraComponent` (`RenderTags "viewmodel"` + `ClearFlags.Depth` +
+  small `ZNear`, main camera gets `RenderExcludeTags "viewmodel"`)
+  *does* stop near-plane + wall clipping — but if the project has **no
+  post-process components**, that overlay camera skips the engine's
+  default tonemap/auto-exposure, so the weapon renders visibly brighter/
+  flatter than the tonemapped world. Either keep the viewmodel in the
+  main camera (simplest) or re-apply the same tonemap on the overlay.
+- **Stop the barrel poking through walls dynamically.** Each frame trace
+  forward from the eye and retract the model along the view by
+  `reach − hitDistance` (eased). Make `reach` *per-weapon* by measuring
+  the weapon's forward extent from `SkinnedModelRenderer.Bounds.Corners`
+  projected onto the view dir — a fixed reach leaves long guns (shotgun)
+  still clipping. Add the current retract back into the measured reach
+  each frame so the value doesn't feed back on itself.
 
 ## Skeletal animation: blending two sequences on one model
 
@@ -288,6 +308,28 @@ they don't know to expect them.
 - Per-frame `SetBoneTransform` on every bone coexists fine with the
   renderer's own animation (the overrides win for that frame) and with a
   separate foot-plant pass that reads `GetBoneTransforms(true)` after.
+
+## SkinnedModelRenderer: first Model assignment skips the bind pose
+
+- The **first-ever `Model` assignment** to a freshly-created `SkinnedModelRenderer`
+  doesn't apply the model's bind pose — the mesh renders in a default/zero pose.
+  Symptom: a prop you snap to a bone (e.g. a weapon parented/positioned onto a
+  hand) renders **detached / floating** on spawn, even though your placement math
+  is provably correct (log the target transform — it's identical before and after).
+- Re-assigning the **same** model, or `null`→model, does **NOT** rebuild it (and
+  null→model can actively reproduce the broken pose). Only a change to a
+  **different valid model and back** forces the bind-pose rebuild — which is why
+  "switch weapon and switch back" fixes it by hand.
+- Fix: on first load, bounce the renderer through a throwaway valid model
+  (`Model.Load("models/dev/box.vmdl")`) for one frame, then set the real model.
+  Gate it to the first assignment only (a one-shot countdown) — later genuine
+  model changes rebuild on their own, and bouncing them re-introduces a flicker
+  or, if you reload the *same* model each frame, re-breaks the pose. Expect a
+  1-frame flicker on spawn.
+- Debugging tip: world-space bone transforms are confounded by facing (yaw). To
+  compare a prop's placement across states, read its `LocalPosition`/`LocalRotation`
+  relative to a body object that's already yaw-aligned, or log the prop-to-bone
+  delta vector — that's facing-independent.
 
 ## schema_signature can't serialize overloaded members
 
@@ -329,6 +371,46 @@ they don't know to expect them.
   default in code + hotload, or drive it from a `[ConCmd]` via
   `run_console_command`. Strings/enums/Guids/numbers set fine.
 
+## Custom rendering (Graphics.Draw / SceneCustomObject)
+
+- **`Material.FromShader` / `Texture.Create` are MAIN-THREAD ONLY.** A
+  `SceneCustomObject.RenderOverride` (and any hook that ends in `Graphics.Draw`)
+  runs on the **render thread**. Creating a material/texture there throws
+  `"Create must be called on the main thread!"` *every frame* → log flood +
+  visible stall, and the resource stays null so nothing draws. Create eagerly on
+  the main thread (component `OnEnabled`) and cache it; the render override must
+  only *read* the cached handle. A lazy `=> _mat ??= Material.FromShader(...)`
+  getter is the trap — if the first read lands on the render thread it fails
+  forever (and silently renders nothing).
+- **Runtime textures render PINK unless the shader has a `Default` AND you bind
+  them.** A bare `Texture2D g_tColor < Attribute("X"); >` samples the pink error
+  texture when unset. Give it `Default4( 1,1,1,1 )` (white fallback, never pink)
+  AND bind it: for `Graphics.Draw`, build a `RenderAttributes` on the main thread,
+  `attr.Set("X", texture)`, pass it to `Draw`. (`material.Set("X", tex)` also
+  works once the material exists.)
+- **`Graphics.CameraPosition` / `CameraRotation`** are available inside the render
+  override for billboards/camera-facing quads. Vertices are world-space; a minimal
+  unlit shader does `Position3WsToPs(v.WorldPosition)` and copies
+  `v.Color → i.vVertexColor`. The common `vertexinput.hlsl` has **no** Color field —
+  add `float4 Color : COLOR0 < Semantic( None ); >` to your VertexInput yourself.
+- **Additive sprite blowout:** stacking many additive sprites saturates toward
+  white and washes out per-particle tint. Expose a colour-multiplier knob (scaling
+  blue/green down pulls a white core back to orange/yellow) instead of fighting it
+  in the texture.
+
+## Component init order: Create() runs OnEnabled *before* you set properties
+
+- `go.Components.Create<T>()` on an **active** GameObject fires `OnEnabled`
+  synchronously — so `[Property]` values you assign on the following lines are
+  applied *after* the component already initialized with its **defaults**. A
+  component that loads/parses something in `OnEnabled` based on a property will
+  use the default, not what the factory sets. Symptom seen: a particle component
+  loaded its default system name (continuous-emitting) instead of the one set
+  right after Create → wrong effect that "lingered" forever. Fix:
+  `Components.Create<T>( false )` → set properties → `component.Enabled = true`.
+  (Or do the load in `OnStart`, which is deferred to the first tick.) Easy to
+  miss when another call site happens to use defaults that match.
+
 ## Misc bridge quirks seen this session
 
 - `screenshot_scene_to_file` writes to **`game_root/screenshots/`**
@@ -344,3 +426,75 @@ they don't know to expect them.
   A `Get<T>()` that worked while a component was enabled returns null once
   something disables it; that exact trap left a respawn unable to re-enable a
   controller it had just disabled.
+
+## Writing custom shaders (.shader)
+
+- **No standalone shader compiler tool.** `shader_compile_and_check` reports
+  `no_compiler` in this build. To compile a `.shader` you wrote: call
+  `asset_compilation_control(path:"shaders/foo.shader", mode:"compile",
+  full:true)` then read errors from `tail_log` (compile output is logged as
+  `Compiling: ...` → per-line `error: ...` → `Shader compile failed` OR
+  `Done N combos in Xms`). The `.shader_c` lands next to the source. Note the
+  tool returns `success:true` even when the HLSL fails — trust the log, not the
+  return value. A `Stall detected.` warn after a multi-second compile is benign.
+- **Don't redeclare the common samplers.** `g_sAniso`, `g_sBilinearClamp`,
+  `g_sBilinearWrap`, `g_sTrilinear*`, `g_sPoint*` are already defined in
+  `core/shaders/common_samplers.fxc` (pulled in via `common/pixel.hlsl`).
+  Redeclaring `SamplerState g_sAniso` is a `redefinition` error — just use them.
+- **Per-instance, no-material-dup params = render attributes.** Declare
+  `float g_flFoo < Attribute("Foo"); Default(1.0); >;` (also works for
+  `float3`/`float4`) and set from C# via
+  `renderer.SceneObject.Attributes.Set("Foo", value)` (RenderAttributes.Set has
+  float/Vector2-4/bool/Texture/etc overloads). Reads layer global → material →
+  SceneObject, so SceneObject wins per-object. Beats minting a Material per
+  instance. `Material.Set("Foo", ...)` sets the material-level default.
+- **Runtime-settable textures = attribute-bound, not CreateInputTexture2D.**
+  `Texture2D g_tFoo < Attribute("Foo"); SrgbRead(true); Default(1.0); >;` lets
+  you push a texture per-instance via `Attributes.Set("Foo", texture)`. The
+  `Default(scalar)` keeps it safe (white/black) when unset — only sample it
+  behind an enable flag so an unbound default is never read for real.
+  `CreateInputTexture2D` textures are material-bound (set via `material.Set`)
+  and can't be overridden cleanly per-instance (MaterialAccessor only swaps the
+  whole Material, not individual params).
+- **Custom lighting model:** iterate `Light::Count(m.ScreenPosition)` +
+  `Light::From(m.WorldPosition, m.ScreenPosition, i, m.LightmapUV)` → per-light
+  `.Color/.Direction/.Attenuation/.Visibility` (Visibility = shadow term).
+  Ambient/indirect = `AmbientLight::From(WorldPos, ScreenPos, Normal)` (the
+  Source-2 equivalent of Unity's `ShadeSH9`). Under `CUSTOM_MATERIAL_INPUTS`,
+  `Material::Init(i)` does NOT fill geometry — set `WorldPosition`
+  (= `i.vPositionWithOffsetWs + g_vHighPrecisionLightingOffsetWs`),
+  `ScreenPosition`, `Normal`, tangents, `LightmapUV` yourself. View dir =
+  `normalize(g_vCameraPositionWs - WorldPos)`. `g_flTime` is the time global.
+- **Inverted-hull outline:** offset `i.vPositionWs` along the world normal in
+  the VS and recompute `i.vPositionPs = Position3WsToPs(i.vPositionWs)` (that's
+  exactly how `VS_CommonProcessing` derives Ps); `RenderState(CullMode, FRONT);`
+  in the PS to draw the back hull. Render it as a SECOND `SkinnedModelRenderer`
+  with `BoneMergeTarget = mainRenderer` so it follows the main renderer's posed
+  bones (including `SetBoneTransform` overrides) for free, with
+  `MaterialOverride` = the outline material.
+
+## More shader findings (toon/cel port session)
+
+- **Attribute-bound `Texture2D` shows PINK if never set.** `< Attribute("X"); Default(1.0); >`
+  does NOT fall back to a solid color at runtime — an unset attribute texture resolves to the
+  engine's missing-texture (pink). If a feature samples it, bind a real fallback from C# every
+  frame: `SceneObject.Attributes.Set("X", userTex ?? Texture.White)` (or `Texture.Black` for an
+  additive slot). Gate the feature on the user actually supplying a texture.
+- **Masked GoldSrc skins → alpha-test or they're black.** GoldSrc "masked" textures (studio flag
+  64) decode their transparent texels to alpha 0 (and often black RGB). An opaque shader renders
+  those as solid black (e.g. a model's mouth/hair cut-outs). Add `clip(albedo.a - 0.5)` in the PS —
+  fully-opaque skins are alpha 1 everywhere so they're never clipped. (Depth/outline passes that
+  don't sample the albedo won't alpha-test — feed alpha through if you need clean cut-outs there.)
+- **Matcap basis must match the engine's view dir.** s&box/Poiyomi build the view-space matcap
+  basis from `viewDir = normalize(CameraPos - WorldPos)` (surface→camera). Using `-V` flips
+  `cross(viewDir, up)` and mirrors the matcap horizontally. Sample the matcap with a CLAMP sampler
+  (`g_sBilinearClamp`) — grazing-angle UVs drift past [0,1] and a wrap sampler grabs the opposite
+  sphere edge. s&box is Z-up, so the matcap "world up" is `(0,0,1)`, not Unity's `(0,1,0)`.
+- **Anti-alias fresnel/rim edges with `fwidth`.** A `smoothstep(a,b,ndv)` rim with a narrow `[a,b]`
+  band is sub-pixel and aliases hard (worse on low-poly normals). Pad the bounds by
+  `fwidth(ndv)*1.5` so the transition is always ~1px soft.
+- **Reading a live runtime component's values over the bridge:** once a Play session is actually up,
+  `list_gameobjects` shows the spawned objects; drill to the component's GameObject and
+  `list_properties(id, component_type)` to read every `[Property]` (incl. the user's live in-editor
+  tweaks). Right after a TogglePlay the bridge can still report only the edit scene — re-query a
+  beat later. This is the reliable way to capture "bake my current tweaks as defaults".
