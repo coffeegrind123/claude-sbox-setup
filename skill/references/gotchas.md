@@ -498,3 +498,49 @@ they don't know to expect them.
   `list_properties(id, component_type)` to read every `[Property]` (incl. the user's live in-editor
   tweaks). Right after a TogglePlay the bridge can still report only the edit scene — re-query a
   beat later. This is the reliable way to capture "bake my current tweaks as defaults".
+
+## UI fonts: you CANNOT register a custom font at runtime from game code
+
+Proven from engine source (`engine/Sandbox.Engine/Systems/Render/TextRendering/FontManager.cs`
++ `engine/Sandbox.Filesystem/`):
+
+- **Fonts are discovered by scanning `/fonts/**/*.{ttf,otf}` across `FileSystem.Mounted`**
+  (`FontManager.LoadAll`). Each face is registered by its **internal SKTypeface family name** —
+  i.e. the name baked into the TTF `name` table (ID 1), NOT the filename. So CSS
+  `font-family: "Whatever"` must match the font's *internal* family name. Parse the TTF name table
+  (or check `Inter-Black.ttf` → family `Inter`) to learn the string to put in CSS.
+- A `FileWatch` on `*.ttf`/`*.otf` over `FileSystem.Mounted` **hot-loads** new/changed font files
+  while the game runs (`OnFontFilesChanged`), and `LoadAll` is re-run on network init. So dropping a
+  `.ttf` into a mounted `/fonts/` folder *on disk* is picked up live — but only the editor/dev disk
+  is writable; see below.
+- **`FileSystem.Mounted` is a READ-ONLY Zio aggregate** (`AggregateFileSystem` — "This is read
+  only"). `Mount`/`CreateAndMount`/`Watch` on `BaseFileSystem` are `internal`. So game code can't
+  write into it and can't add its own writable mount.
+- The only game-writable filesystems — `FileSystem.Data` and `FileSystem.OrganizationData` — are
+  **NOT mounted into `FileSystem.Mounted`** (verified the full mount list in `GameInstanceDll.cs`
+  + `GameInstance.cs`). Fonts written there are never discovered. The networked file stores
+  (`NetworkedLargeFiles`/`SmallFiles`) ARE mounted + trigger a font reload, but they're private
+  engine fields populated only from ProjectSettings/Language — no public API to add arbitrary files.
+- There is **no public `AddFont(stream)` / `RegisterTypeface` API** (`FontManager` is internal).
+
+**Consequence:** you cannot feed a runtime-downloaded `.ttf` to the *engine's* font/text system.
+Two ways around it:
+
+1. **Bundle** the candidate fonts as project content (`Assets/fonts/`) at dev/build time and select
+   among the already-loaded family names at runtime (`families[hash % count]`). Simple, full engine
+   text rendering, but every font ships in the package.
+
+2. **Rasterize the font yourself** (what MGE does — see `projects/mge/Code/Text/`). Download the
+   `.ttf` with `Http.RequestBytesAsync` (s&box forces UA `facepunch-sbox` + a Referer and forbids
+   overriding them — fine for most hosts; verify your API doesn't UA-filter), parse the `glyf`
+   outlines in pure C# (`TrueTypeFont.cs`), fill them with an anti-aliased non-zero-winding scanline
+   rasterizer (`GlyphRasterizer.cs`), pack the glyphs into an RGBA strip, and `Texture.Create(w,h,
+   ImageFormat.RGBA8888).WithData(bytes).Finish()`. Render text as one panel per glyph: same strip as
+   `Style.BackgroundImage`, `BackgroundSizeX` = full strip width, `BackgroundPositionX` =
+   `-(cell*cellWidth)`, `Overflow = Hidden`, `BackgroundRepeat = NoRepeat`, `BackgroundTint` = colour
+   (store glyphs white-alpha so the tint colours them). This gives true on-the-fly fonts (any font,
+   any time, no bundling) at the cost of a glyph rasterizer. Only `Texture.Create` needs the main
+   thread — the parse/raster is plain CPU work that can follow an `await`. Worth it when the glyph
+   set is tiny (HUD digits) and the font is chosen at runtime (e.g. hashed from the player's model).
+   Note CFF/OpenType-PostScript outlines (`CFF `/`CFF2` table, no `glyf`) need a separate Type2
+   charstring interpreter — check your catalogue's sfnt version first.
