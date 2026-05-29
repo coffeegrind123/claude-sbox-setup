@@ -2,6 +2,49 @@
 
 The in-editor MCP server (the claude-sbox s&box tool addon, `ghage/claude-sbox` on sbox.game) listens on `127.0.0.1:6790`. The `sbox-mcp-bridge` Node package re-exposes everything as stdio MCP. Tools are grouped by subsystem; all calls return JSON.
 
+## Capability map: what the live bridge gives you
+
+This is the narrative overview of every capability bucket (the per-subsystem tables below have the exact tool surfaces). SKILL.md links here for the full map.
+
+When you're in an s&box context, you have access to **three ground-truth pipelines** (live, no snapshots):
+
+1. **Live API schema**: locally built from the editor's loaded assemblies via `Facepunch.AssemblySchema`. Strictly more accurate than any CDN snapshot because it reflects the exact engine + addon DLLs the user is running. Use the `schema_*` MCP tools to look up exact, doc-commented signatures for every public type/method/property/field/attribute.
+2. **Live prose docs**: two sibling pipelines, both cached + BM25-indexed by the MCP server. Use `docs_*` for **first-party Facepunch documentation** (Facepunch/sbox-docs repo, CC-BY-4.0, with `sbox.game/llms.txt` as fallback) — the authoritative usage docs for the engine and editor. Use `learn_*` for **community tutorials** (daily mirror of sbox.game/learn at `coffeegrind123/sbox-learn-docs`) — walkthroughs and how-tos written by other s&box developers, with rich faceted metadata (difficulty, topic, content_type, tags) you can filter on.
+3. **Hosted structured docs** (`sdocs_*`): third-party Meilisearch proxy at `sdocs.suiram.dev` exposing 9 tools for symbol resolution, per-method overload details, examples, and related guides. Distinct from `docs_*`: returns structured per-symbol metadata + ranked hits + per-method per-parameter type/doc breakdowns. **Queries leave the machine**: for symbol names lifted from private project source, prefer `schema_*` + `docs_*`. See § Hosted structured docs and gotchas.
+
+**Recommended docs-query layering** (default; deviate when the user already pinned a layer):
+
+1. **Ground first** with `schema_search_members(query)` or `schema_lookup_type(fqn)` — confirms the symbol actually exists in *this* build and pins the canonical FQN. If `connected=false`, skip to step 3 (local prose still works).
+2. **Get usage shape** with `sdocs_search_docs(query)` → `sdocs_get_method_details(id)` for per-parameter docs/return types, plus `sdocs_get_examples(id, includeRelated:true)` when the agent needs to see how the call is wired. Skip if the symbol came from private project source (privacy: queries leave the machine).
+3. **Get the narrative** with `docs_search(query)` → `docs_get(path)` for first-party prose (lifecycle, RPC semantics, networking visibility rules, etc.). Use `sdocs_get_related_guides(id)` instead when you already have an FQN — it cross-links the symbol back to the prose page.
+4. **Fall back to community** with `learn_search(query)` or `learn_search(topic: "...", difficulty: "Beginner")` when official docs don't cover the question. Faceted; use empty query + filter for "highest-rated in this topic".
+
+Shortcut: for a one-line concept ("RPC visibility rules") skip 1 and start at 3. For verifying a method call you're about to write, run 1 alone — schema is ground truth.
+
+You also have **live editor introspection + drive** when the editor is running and the bridge is connected:
+
+4. **Editor mode + state**: `editor_state` is a one-call snapshot of mode (edit/play/paused), scene state, project, multiplayer status, filesystem scopes, dispatcher metrics, and capability flags. **Call this first** when you don't know what state the editor is in; gate any mode-dependent tool on its result.
+
+5. **Scene / inspector / project / console**: `get_active_scene`, `list_gameobjects`, `get_components`, `get_selection`/`set_selection`, `list_properties`/`get_property`/`set_property`, `list_addons`, `tail_log`/`print_log`, `find_asset`/`list_assets`, plus `instantiate_prefab`, `find_game_objects_in_radius`, `frame_selection`, `save_scene`, `batch_transform`, `copy_component`. All edits go through the editor undo scope. For component lifecycle (add/remove/enable/reorder) see `gameobject_*`; for prefab override tracking see `prefab_*`.
+
+6. **UI discovery + drive**: anything user-facing in the editor is reachable. `list_docks`/`list_menus`/`list_shortcuts`/`list_widgets`/`find_widget` discover; `activate_dock`/`set_dock_visible`/`invoke_menu`/`invoke_shortcut`/`click_widget`/`focus_widget`/`send_keys`/`run_console_command` drive. Auto-generated wrappers cover every method tagged `[Menu]`/`[Shortcut]`/`[ConCmd]`/`[Editor.Tool]`: MCP names are `auto_<Type>_<Method>` (underscore form; the canonical identity in `auto_list` output uses `auto:<Type>.<Method>` with dots/colons but the exposed tool name substitutes underscores).
+
+7. **Visual guidance**: `spotlight(target, message)` (single mode) or `spotlight(sequence: [{target, message, dwell_ms}, ...])` (tour mode) draws a glow border + speech bubble around a UI element, dimming everywhere else. Use this for "where is X?" / "show me Y" questions instead of a paragraph of prose; it's faster and the user actually sees what you mean. `editor_highlight` is the older basic single-stop variant: reach for it only when tour mode isn't needed.
+
+8. **Editor preferences**: `list_preferences`/`get_preference`/`set_preference` for every property on `Editor.EditorPreferences`. Plus `export_preferences` / `import_preferences` for full snapshot+restore.
+
+9. **Code reasoning**: `reflection_*` tools go beyond `schema_*` signature lookup into relationships and discovery: `reflection_find_types_with_attribute`, `reflection_find_methods_with_attribute`, `reflection_get_type_hierarchy` (bases + interfaces + subclasses), `reflection_get_enum_values`, `reflection_get_member_metadata` (Title/Icon/Group/Order/Tags), `reflection_parse_attribute_metadata`, `reflection_find_resource_types_with_extension`. Cross-reference via `find_type_usages` / `find_method_overrides` / `find_symbol_definition`.
+
+10. **Compile + hotload introspection**: `compile_check_build_state` (non-blocking), `compile_get_diagnostics` (errors/warnings without re-running), `compile_list_compilers`, `hotload_get_last_result` (TypeTimings, warnings), `hotload_list_queued_assembly_swaps`. Plus an async-job pattern: `start_compile_project_job` → `poll_job` → `cancel_job` / `list_jobs` for non-blocking compiles. Roslyn devtools: `compile_snippet` (diagnostics, no execution), `parse_syntax_tree` (AST dump), and **`execute_csharp`** (REPL-style evaluation in the live editor process via reflective `CSharpScript.EvaluateAsync`: auto-imports `System` / `System.Linq` / `Sandbox` / `Editor` / `Editor.ClaudeSbox.Mcp`, plus a comma-separated `imports` arg for extras). Use `execute_csharp` to answer "what does `Scene.GetAllComponents<X>().Count()` return right now?" in one shot instead of compiling a snippet that doesn't run.
+
+11. **Asset native + cloud library + event bus**: local: `asset_query_state` (compiled? cached? unsaved?), `asset_query_dependencies` (refs/dependants/parents, deep), `asset_compilation_control`, `asset_render_thumbnail` (PNG to disk), `asset_set_in_memory_override` (live-prototype without disk writes). Cloud library: `asset_search(query, take?)` queries sbox.game's public package library, `asset_fetch(ident)` returns full metadata, `asset_mount(ident, pin_to_project?)` mounts via `Package.MountAsync` and (default) appends the ident to the active project's `.sbproj` `PackageReferences` so it auto-mounts on subsequent loads, `asset_unpin(ident)` is the symmetric inverse. Event bus: `wait_for_*` and `last_*` over 28 EditorEvents (`scene.play`, `compile.shader`, `content.changed`, `hotloaded`, `package.changed.*`, `hammer.*`, `asset.contextmenu`, `assetsystem.openpicker`, `folder.contextmenu`, `editor.created`, etc.) plus composites: `wait_for_scene_state`, `wait_for_asset_ready`, `wait_for_editor_ready`, `wait_for_content_change`.
+
+12. **Gizmo + console vars + project + Qt native**: `get_gizmo_state` / `set_gizmo_mode|space|snap_settings|scale`, `list_concmds` / `list_convars` / `get_convar` / `set_convar`, `set_active_project`, `validate_project`, `widget_get_geometry` / `widget_set_visible|opacity|focus_policy`, `widget_capture_to_png` (widget → PNG), `splitter_save_state` / `splitter_restore_state`. Inspector input writes that bypass `set_property` (custom widgets, popup dialogs): `set_input_text` / `set_color` / `set_checkbox` / `set_slider_value` / `select_dropdown_option` / `set_widget_value` (universal); `inspect_widget` to discover an unfamiliar widget's surface first.
+
+13. **Filesystem reads**: `host_*` (8 tools) reads the engine source tree, addon source, project content, editor caches without needing a bind mount. 14 scopes (9 `filesystem_scope` + 5 `absolute_path`), all read-only. Call `host_list_scopes` first to discover what's reachable, then `host_read_file` / `host_grep` / `host_list_directory` / `host_read_text_around` (lines around a target line).
+
+The principle: **anything the user can do in the editor, you can do**. If you can't find a tool for it, try `list_menus`/`list_shortcuts` first (almost everything is registered there), then `run_console_command` as the universal escape hatch.
+
 ## Diagnostic / meta
 
 | Tool | What it does |
