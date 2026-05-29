@@ -216,11 +216,10 @@ Read engine source / addon source / editor caches without a bind mount. **All re
 
 ## Animation
 
-- `anim_get_parameter_{bool,int,float,vector,rotation}` / `_set_parameter`.
-- `anim_set_ik_target` / `_clear_ik`.
-- `anim_morph_set` / `_get` / `_clear`.
-- `anim_get_bone_transform` / `_get_all_bone_transforms` / `_get_bone_velocity` / `_get_attachment`.
-- `animgraph_get_preview_model` / `_set_preview_model` / `_get_sequences` / `_play_sequence` / `_get_playback_state` / `_set_playback_time` / `_stop_playback`.
+- **Runtime (live SceneModel)**: `anim_get_parameter_{bool,int,float,vector,rotation}` / `_set_parameter`. `anim_set_ik_target` / `_clear_ik`. `anim_morph_set` / `_get` / `_clear`. `anim_get_bone_transform` / `_get_all_bone_transforms` / `_get_bone_velocity` / `_get_attachment`.
+- **Playback preview**: `animgraph_get_preview_model` / `_set_preview_model` / `_get_sequences` / `_play_sequence` / `_get_playback_state` / `_set_playback_time` / `_stop_playback`.
+- **Animgraph asset READ (`.vanmgrph` KV3 source)**: `animgraph_source_inspect` (nodes, connections, parameters, and state machines with transition conditions resolved to parameter names — this is how you find which transition/sequence drives an animation, e.g. a weapon draw) / `animgraph_source_serialize` (raw KV3→JSON) / `animgraph_list_node_classes` (catalog of native `C*AnimNode` classes + property keys, harvested from disk).
+- **Animgraph asset EDIT (`.vanmgrph` KV3 source)**: `animgraph_edit_load` → mutate → `animgraph_edit_verify` (non-destructive serialize+reparse) → `animgraph_edit_save` (backup + write + recompile; `dry_run` supported). Mutations: `animgraph_set_node_property` (e.g. `m_sequenceName`, `m_bLoop`), `animgraph_connect` / `animgraph_disconnect`, `animgraph_add_node` (clone-template, in-graph or from another `.vanmgrph`), `animgraph_delete_node`, `animgraph_set_transition_disabled` (kill a state-machine edge — e.g. stop a draw state being entered). **These edit the source file, NOT `nodegraph_*`** (animgraph is native, not an `IGraph` — see "Action graph + node graph").
 
 ## Sound runtime
 
@@ -257,6 +256,7 @@ Read engine source / addon source / editor caches without a bind mount. **All re
 - `nodegraph_inspect` / `_serialize` / `_list_node_types` (lazy: see gotchas) / `_find_node_by_name` / `_get_pin_types` / `_validate_graph`.
 - `nodegraph_create_node` / `_connect_pins` / `_delete_node` / `_disconnect_pin` / `_save` / `_set_node_position` / `_set_node_size` / `_set_reroute_comment`: mutate.
 - `shadergraph_list_parameters`.
+- **Scope**: `nodegraph_*` works on managed `Editor.NodeEditor.IGraph` + `GameResource` assets — i.e. **ActionGraph and ShaderGraph only**. It does **not** work on Animation Graphs: the animgraph editor is native C++ and `AnimationGraph` is a native-handle `Resource`. To edit animgraphs use the `animgraph_source_*` / `animgraph_edit_*` family (see "Animation"), which operates on the `.vanmgrph` KV3 source text.
 
 ## Code-template scaffolders (emit `.cs`)
 

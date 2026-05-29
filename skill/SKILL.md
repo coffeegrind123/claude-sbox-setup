@@ -41,6 +41,7 @@ If `sbox_status` reports `connected=false`, the editor isn't running or the brid
 | The Ten Rules of s&box (lifecycle, networking, async) | `references/ten-rules.md` |
 | Common gotchas (namespace surprises, signature traps, silent set_property failures, set_property can't coerce bool/Vector3, bone GET=world vs SET=model space, Components.Get skips disabled, live runtime debugging, screenshot location, sdocs privacy, auto_* naming, widget_drag rejections) | `references/gotchas.md` |
 | Bodygroups: hiding/showing body parts on models (e.g. citizen) | `references/bodygroups.md` |
+| Inspecting/editing an **animation graph** (`.vanmgrph`): find what drives an animation, disable a state-machine transition, change a node's sequence, add/connect nodes | Don't read a file: `animgraph_source_inspect(path)` to map nodes/connections/parameters/state-machines, then the `animgraph_edit_*` session tools (`_load` → mutate → `_verify` → `_save`) + `animgraph_set_node_property` / `animgraph_set_transition_disabled` / `animgraph_connect` / `animgraph_add_node`. Operates on the KV3 source — **not** `nodegraph_*` (that's ActionGraph/ShaderGraph only). See `references/tool-families.md` § Animation. |
 | Live MCP tools you can call (curated, with usage stories) | `references/mcp-tools.md` |
 | "Is there a tool for X?": discovery index across all ~597 bridge tools | `references/tool-families.md` |
 | Driving an open file dialog or spawning a modal file picker | Call `pick_file` (modal blocking) or `file_dialog_*` (drive an already-open dialog) |

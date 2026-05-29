@@ -714,6 +714,8 @@ All take a `path` parameter (e.g. `models/citizen/citizen.vmdl`), not `model`.
 
 Discovery, inspection, and mutation of the user's visual-script graphs. Mutation tools DO ship; use them sparingly and prefer letting the user open the graph editor for substantial changes.
 
+**Scope — ActionGraph & ShaderGraph only.** `nodegraph_*` operates on managed `Editor.NodeEditor.IGraph` + `GameResource` assets. It does **not** work on Animation Graphs (`.vanmgrph`): that editor is native C++ and `AnimationGraph` is a native-handle `Resource`, so it exposes no `IGraph`. For animgraphs use the **Animgraph source** tools below.
+
 **Lazy node-type registration**: `nodegraph_list_node_types` only returns nodes registered by currently-open graph editors. Open an `.action` first to see ActionGraph node types; open a `.shdrgraph` to see ShaderGraph node types. Without an open editor of the matching kind, expect ~1 result (`Common Nodes/No Operation` reroute). See gotchas.
 
 | Tool | What it does |
@@ -729,6 +731,25 @@ Discovery, inspection, and mutation of the user's visual-script graphs. Mutation
 | `nodegraph_set_node_position(path, node_identifier, position)` / `_set_node_size(path, node_identifier, size)` / `_set_reroute_comment(path, node_identifier, comment)` | Layout / annotation. |
 | `nodegraph_save(path)` | Persist mutations to disk. Without this, edits are in-memory only. |
 | `shadergraph_list_parameters(path)` | Public material parameters surfaced by a ShaderGraph. |
+
+## Animgraph source (read + edit `.vanmgrph`)
+
+Inspect and edit Animation Graphs by their KV3 source, since the editor is native and `nodegraph_*` can't reach it. Reads go through the engine `KeyValues3ToJson` bridge (with the leading `<!-- kv3 ... format:animgraph2 -->` header stripped, which the parser requires); edits mutate an in-memory JSON DOM and are written back as KV3 by a serializer that preserves the header verbatim and int/float typing, then recompiled via `AssetSystem.CompileResource`. Editing is **session-based**: `_load` once, mutate, then `_verify` / `_save`.
+
+| Tool | What it does |
+|---|---|
+| `animgraph_source_inspect(path)` | Read-only structure: nodes (id/class/name/position), class histogram, resolved input connections, parameters (name/type/id/default), and state machines — each transition's conditions resolved to **parameter names**. This is how you find which transition or sequence node drives a given animation (e.g. a weapon draw). |
+| `animgraph_source_serialize(path, max_length?)` | Raw KV3→JSON of the whole graph. |
+| `animgraph_list_node_classes(path?, query?, node_only?, max_files?)` | Catalog of native `C*AnimNode` classes with occurrence counts, an example asset, and the union of property keys — harvested from `.vanmgrph` on disk. Use to discover node types/fields before adding/cloning. |
+| `animgraph_edit_load(path)` | Open an editing session (parse source → mutable DOM). |
+| `animgraph_edit_verify(path)` | Non-destructive: serialize the session to KV3 and re-parse it; confirms validity (node/param counts) **before** saving. |
+| `animgraph_edit_save(path, dry_run?, backup?)` | Serialize → back up to `<file>.bak` → write → recompile. `dry_run:true` reports the KV3 + verifies without writing. |
+| `animgraph_edit_discard(path)` | Drop the session, abandoning unsaved edits. |
+| `animgraph_set_node_property(path, node_id, property, value)` | Set a node member (JSON value), e.g. `m_sequenceName`, `m_sName`, `m_bLoop`, `m_playbackSpeed`. |
+| `animgraph_connect(path, to_node_id, from_node_id, input_field?, from_output?)` / `animgraph_disconnect(path, node_id, input_field?)` | Wire/clear a node input (`m_inputConnection` default; `m_inputConnection1/2`, `m_baseInput`, … via `input_field`). |
+| `animgraph_add_node(path, template_node_id? | template_class?+template_from_path?, position?, name?, properties?)` | Add a node by cloning a template (so required fields/defaults are valid) with a fresh unique id. |
+| `animgraph_delete_node(path, node_id)` | Remove a node and clear any input connections that referenced it. |
+| `animgraph_set_transition_disabled(path, state_machine_id, state_id, dest_state_id, disabled)` | Toggle a state-machine transition's `m_bDisabled`. Disabling the edge into a state stops that state (e.g. a draw) from being entered via it — a permanent fix the per-frame game params can't override. |
 
 ## Action graph metadata (read + write)
 

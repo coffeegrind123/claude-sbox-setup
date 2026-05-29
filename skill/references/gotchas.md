@@ -422,16 +422,22 @@ data (`[Button] Reload`, re-run the generator) rather than trusting the hotload.
     draw), so you get a broken viewmodel, not "no draw". Don't go here to kill
     the draw.
   - The honest fix for changing deploy/fire/reload interaction is to **edit the
-    animgraph asset** in the model editor (author fire as absolute, or add the
-    transition), not to fight it from C#. Leave the viewmodel graph-driven.
+    animgraph asset** (author fire as absolute, or add/disable the transition),
+    not to fight it from C#. Leave the viewmodel graph-driven. You can now do this
+    over the bridge without the native editor: `animgraph_source_inspect(path)` to
+    find the state/transition that plays the draw, then `animgraph_set_transition_disabled`
+    (kill the edge into the deploy state) or `animgraph_set_node_property` (repoint/blank
+    the sequence), then `animgraph_edit_save`. See `references/mcp-tools.md` § Animgraph source.
   - Shotgun reload is a real per-shell chain in the model (`reload_entry` →
     `reload_firstshell` → `reload_shell`×N → `reload_exit`); it's sequenced by
     the graph's reload params, not a single `b_reload` bool.
-  - To recover the real param/clip names offline: decompile the sibling
-    `.vanmgrph_c` (find it via the `.vmdl_c` RERL refs). Source 2 resource; the
-    `DATA` block is KV3v3 (magic `02 33 56 4B`), usually LZ4-compressed — decode
-    the single block (compressedSize→uncompressedSize) and the string table is
-    the tail after `cnt_bin + cnt_int*4 + cnt_8*8` bytes.
+  - To recover the real param/clip names: if the `.vanmgrph` **source** is present,
+    `animgraph_source_inspect(path)` gives parameters, sequence-node names, and the
+    state machine directly (no decompile). Only if you have **just the compiled
+    `.vanmgrph_c`** (find it via the `.vmdl_c` RERL refs) fall back to decompiling it:
+    Source 2 resource; the `DATA` block is KV3v3 (magic `02 33 56 4B`), usually
+    LZ4-compressed — decode the single block (compressedSize→uncompressedSize) and the
+    string table is the tail after `cnt_bin + cnt_int*4 + cnt_8*8` bytes.
 - **Setting `b_deploy_skip` BEFORE assigning `Model` also fails — and the reason is
   worth knowing.** You'd think `Set("b_deploy_skip", true)` before `Renderer.Model = x`
   would stick (SkinnedModelRenderer stores params and re-applies them via
