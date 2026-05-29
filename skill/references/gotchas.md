@@ -152,6 +152,126 @@ they don't know to expect them.
   with a cold `dotnet restore` can easily blow past that. Windows
   only — `bootstrap_engine` shells out to `Bootstrap.bat` at the
   sbox-public root.
+- `gameobject_add_component` can fail with `no_typedesc`
+  ("TypeLibrary has no entry for X") on a type that resolved fine
+  moments earlier. Trigger: a project **recompile/hotload** in the
+  same session leaves a *pre-existing* (already-loaded) type with a
+  stale duplicate `TypeDescription`, and the reflection resolver binds
+  the old, unregistered copy. Brand-new types created *after* the
+  recompile resolve fine; only types that existed before it go stale.
+  Retrying the add or using the fully-qualified name does **not** help —
+  **only an editor restart clears it** (the scene reloads from disk and
+  the TypeLibrary is rebuilt clean). Practical consequence: don't
+  remove-then-re-add a pre-existing component across a recompile via the
+  bridge. If you must change a component's serialized default, edit the
+  code default and either (a) restart so the disk scene reloads, or
+  (b) toggle the value in the inspector — don't delete the component
+  expecting to re-add it.
+
+## Making runtime-built GameObjects click-selectable in the viewport
+
+A plain `ModelRenderer` registers **no gizmo hitbox**, and the scene editor's
+click-to-select is a native pick that doesn't reliably cover GameObjects you
+build **procedurally at runtime** (a tool/component spawning meshes). Symptom:
+the objects show in the hierarchy and render fine, but you cannot click them in
+the viewport to select them. Components that *are* viewport-clickable (e.g.
+`SpawnPoint`, `SpriteRenderer`) opt in by registering a hitbox in their own
+`DrawGizmos`.
+
+To make your runtime children clickable, register a hitbox per object in a
+component's `DrawGizmos` and select on click:
+
+```csharp
+protected override void DrawGizmos()
+{
+    if ( !Scene.IsEditor ) return;
+    foreach ( var go in myRuntimeObjects )
+    {
+        using ( Gizmo.ObjectScope( go, go.WorldTransform ) )
+        {
+            Gizmo.Hitbox.BBox( renderer.Model.Bounds );   // click anywhere on the prop
+            // or: Gizmo.Hitbox.Sprite( Vector3.Zero, 28f, worldspace: false ); // a screen-space label
+            if ( Gizmo.WasClicked )
+                using ( Scene.Editor?.UndoScope( $"Select {go.Name}" ).Push() )
+                    Gizmo.Select();   // selects Gizmo.Object, set by ObjectScope
+        }
+    }
+}
+```
+
+- **`Gizmo.Hitbox.Model(model)` does NOT work for runtime-built models** — they
+  have no trace mesh, so it produces no clickable area (the object shows a name
+  label but the mesh body is dead to clicks). Use `Gizmo.Hitbox.BBox(model.Bounds)`
+  (whole prop) or `Gizmo.Hitbox.Sprite(center, pixels, worldspace:false)` (a
+  screen-space disc, e.g. over a name label). Both work reliably.
+- `Gizmo.Draw.ScreenText(...)` is **purely visual** — registers no hitbox, so a
+  text label is never clickable on its own. Pair it with a `Sprite` hitbox.
+- `Gizmo.ObjectScope(obj, tx)` sets `Gizmo.Object`; `Gizmo.Select()` then selects
+  *that* object. Hover is keyed by path, so a nested ObjectScope's hitbox selects
+  the nested object, not the component's own GameObject. Wrap `Select()` in
+  `Scene.Editor?.UndoScope(name).Push()` to make it undoable — exactly what the
+  engine's own `GameObject.GizmoSelect` does.
+- Component `DrawGizmos` runs every editor frame regardless of selection (gated
+  only by the viewport's global Gizmos toggle); hitboxes are always live in edit
+  mode. They do **not** run in Play (`Scene.IsEditor` is false there).
+- `Gizmo.Settings` is **null outside a gizmo draw pass**, so bridge tools
+  `get_gizmo_state` / `is_gizmo_enabled_for_type` / `list_gizmo_disabled_types`
+  return `no_gizmo` when called cold. That's expected, not a failure.
+
+## Runtime-built GameObjects must be flagged NotSaved, or they serialize as "white boxes"
+
+A component that builds geometry **procedurally at runtime** (spawns child
+GameObjects with `ModelRenderer`s whose `Model` is a `Model.Builder` mesh, or
+materials made via `Material.Create`/`FromShader`) MUST flag the built root
+`GameObjectFlags.NotSaved` immediately after creating it:
+
+```csharp
+_root = new GameObject( GameObject, true, "BuiltStuff" );
+_root.Flags = GameObjectFlags.NotSaved;   // excludes the whole subtree from disk + Play-clone
+```
+
+`GameObjectFlags.NotSaved` (value 2, "Don't save this object to disk, or when
+duplicating") propagates to descendants — serialization skips the subtree.
+
+**Why it matters — the failure is silent and confusing.** If the root is *not*
+flagged and `save_scene` runs while the geometry is built (e.g. you pressed a
+"Build"/"Reload" button, then saved), the editor bakes every runtime
+`ModelRenderer` into the `.scene` JSON. A procedural `Model` / runtime `Material`
+**cannot round-trip through serialization** — there's no asset path to reload
+from — so on the next scene load the renderers come back with a null/default
+model and render as plain **white boxes**. Tells: the `.scene` file balloons
+from a few hundred lines to tens of thousands; the hierarchy shows the built
+children but with no rebuild log line; everything is white/untextured.
+- This also fixes the **enter-Play double-geometry** trap: without `NotSaved`,
+  the edit-mode build gets cloned into the Play scene *and* the component's
+  `OnStart` rebuilds it → two overlapping copies (double colliders). `NotSaved`
+  stops the clone; only the component persists and it rebuilds once on load.
+- Recovery if a scene is already polluted: recompile with the flag added, press
+  the component's rebuild button (it should sweep prior built children by name),
+  then `save_scene` — the file shrinks back to just the component. Verify with a
+  line count on the `.scene`.
+- Don't confuse with `Hidden` (1, hides in hierarchy/inspector) or `EditorOnly`
+  (2048, never spawns in game). You want `NotSaved` specifically.
+
+## Hotload discards a field's value when its TYPE changes
+
+Changing a field's type mid-session — e.g. a tracking list from
+`List<(GameObject, string, bool)>` to `List<(GameObject, string, bool, Model)>`,
+or any other type change — makes the hotloader log
+
+> `Field has changed type, so values of the old type will be discarded`
+> `  Member: YourType._field`
+
+and **wipe that field** on the hotload. For a collection populated at runtime
+(not from the serialized scene) it becomes **empty** until something rebuilds it.
+The trap: code that iterates it (gizmos, per-frame logic) then silently does
+nothing — **no error, no exception** — so a feature that worked a moment ago just
+stops. This cost a long debugging detour: editor gizmos + a click-to-select
+feature went dead after such a hotload, and only a map *reload* (which
+repopulates the list) brought them back. Adding/removing fields and plain value
+changes hotload fine — only a **type change on an existing field** triggers the
+discard. After an unavoidable type change, re-run whatever rebuilds the runtime
+data (`[Button] Reload`, re-run the generator) rather than trusting the hotload.
 
 ## Bridge tool reliability
 
@@ -259,6 +379,12 @@ they don't know to expect them.
   `CameraComponent` default `ZNear` is **10**, which culls the close
   first-person geometry. Lower the *main* camera's `ZNear` (~1). Keep
   the viewmodel in the **main camera** so its shading is unchanged.
+  - **Cost:** `ZNear` is the *whole scene's* near plane, so it sets
+    depth-buffer precision globally. Dropping it to ~1 on a large map
+    degrades depth-driven post effects (GTAO/SSAO, SSR) — see the SSAO
+    note below. Lower it only as far as the viewmodel actually needs,
+    and prefer pushing the gun back (so it clears a higher `ZNear`)
+    over collapsing precision for the entire world.
 - **Don't "fix" clipping with a separate depth-clearing viewmodel
   camera unless you replicate post-processing.** A second
   `CameraComponent` (`RenderTags "viewmodel"` + `ClearFlags.Depth` +
@@ -275,6 +401,57 @@ they don't know to expect them.
   projected onto the view dir — a fixed reach leaves long guns (shotgun)
   still clipping. Add the current retract back into the measured reach
   each frame so the value doesn't feed back on itself.
+- **FIRE is an ADDITIVE over a base Deploy→Idle/Reload state machine — you
+  CANNOT make a shot "replace"/cancel the draw or reload from code params.**
+  (Confirmed by decompiling the graph: node comments say "Mix additives onto
+  animation" / "Fire additive SM".) `b_attack` layers the fire pose on top of
+  whatever the base SM is playing; if the draw is still running, you see the
+  draw + a fire twitch, not a clean fire. The base SM only leaves Deploy when
+  the **draw clip finishes** (there is no deploy→fire transition). Things that
+  do **NOT** work and are dead ends (burned a lot of time here):
+  - `b_deploy_skip` is an **entry-only** selector flag. The graph enters Deploy
+    the instant you assign `Model`, so setting it *after* (the only time you
+    can — the graph doesn't exist before the model) is too late. Holding it
+    true every frame doesn't cut an in-progress draw either.
+  - `speed_deploy` scales the draw clip but the deploy→idle exit isn't reliably
+    tied to it, so cranking it doesn't guarantee the draw is "done" by the fire
+    gate.
+  - **`UseAnimGraph = false` is NOT a clean escape hatch.** You lose *every*
+    layer at once — `move_bob`/walk, jump/land, idle breathing, the additive
+    fire, and reload — and the model still plays its default sequence (often the
+    draw), so you get a broken viewmodel, not "no draw". Don't go here to kill
+    the draw.
+  - The honest fix for changing deploy/fire/reload interaction is to **edit the
+    animgraph asset** in the model editor (author fire as absolute, or add the
+    transition), not to fight it from C#. Leave the viewmodel graph-driven.
+  - Shotgun reload is a real per-shell chain in the model (`reload_entry` →
+    `reload_firstshell` → `reload_shell`×N → `reload_exit`); it's sequenced by
+    the graph's reload params, not a single `b_reload` bool.
+  - To recover the real param/clip names offline: decompile the sibling
+    `.vanmgrph_c` (find it via the `.vmdl_c` RERL refs). Source 2 resource; the
+    `DATA` block is KV3v3 (magic `02 33 56 4B`), usually LZ4-compressed — decode
+    the single block (compressedSize→uncompressedSize) and the string table is
+    the tail after `cnt_bin + cnt_int*4 + cnt_8*8` bytes.
+- **Setting `b_deploy_skip` BEFORE assigning `Model` also fails — and the reason is
+  worth knowing.** You'd think `Set("b_deploy_skip", true)` before `Renderer.Model = x`
+  would stick (SkinnedModelRenderer stores params and re-applies them via
+  `ApplyStoredAnimParameters` when the SceneObject is created, before the first tick).
+  But reassigning `Model` on an **already-enabled** renderer does NOT recreate the
+  SceneObject — `ModelRenderer.UpdateObject` just swaps `_sceneObject.Model = x` in
+  place, so `OnSceneObjectCreated`/`ApplyStoredAnimParameters` never re-run and the new
+  animgraph inits with the param back at its default → deploy plays. (Stored params only
+  apply on a *fresh* SceneObject, i.e. the renderer's first enable.)
+- **What DOES work to kill the deploy from C# without editing the graph: fast-forward
+  the animgraph past it.** On a fresh equip, set `Renderer.PlaybackRate` very high (e.g.
+  60) for the first ~2 frames, then restore `1`. 60×dt advances ~1s of graph time per
+  frame, so the ~0.5s deploy completes (lands in idle) before it's ever rendered.
+  Pair it with a **procedural transform offset** (slide/rotate the model in over ~0.3s,
+  same mechanism as the wall-pushback retract) for a clean "programmed draw" that
+  replaces the baked swing. The rest of the graph (idle/fire/bob) is untouched.
+- **Hiding only the GUN mesh (no arms):** the arms are a *separate* renderer bonemerged
+  onto the gun (the `v_` model is gun-only), so just don't enable/load the arms renderer
+  — the gun's animgraph is unaffected. (Toggle live by loading/clearing the arms `Model`
+  + `Enabled`.)
 
 ## Skeletal animation: blending two sequences on one model
 
@@ -331,6 +508,130 @@ they don't know to expect them.
   relative to a body object that's already yaw-aligned, or log the prop-to-bone
   delta vector — that's facing-independent.
 
+## Recompiling a shader pinks already-built materials in the editor
+
+Editing/recompiling a `.shader` invalidates the compiled `shader_c` that
+**already-built `Material` instances** point at, so anything using that shader
+renders **pink (error checkerboard) in the editor scene view** until its
+materials are rebuilt. A fresh Play session (or any code path that re-creates
+the materials via `Material.Create`) binds the new `shader_c` and looks **fine**
+— so the tell is **"pink in editor only, fine in game."** It is *not* a compile
+error (the shader compiles); it's a stale handle.
+
+- Don't panic-revert: confirm the shader compiles (`asset_compilation_control(
+  path, mode:"compile", full:true)` → `success:true`), then **rebuild the
+  materials** — reload/regenerate whatever created them (a map/asset reload
+  button, re-enter Play, or re-run the generator). Reverting the shader edit just
+  triggers *another* recompile and the same staleness.
+- Extra caution with **shared shaders**: one `.shader` is often used by several
+  systems (e.g. a "world" shader reused for props and dev materials). A change
+  you make for one consumer recompiles it for **all** of them and pinks every
+  material in the editor that references it. Check who else uses a shader (grep
+  `Material.Create( …, "shaders/foo.shader" )`) before editing it, and prefer a
+  separate shader (or a `Feature`/`StaticCombo`) over adding consumer-specific
+  logic to a shared one.
+- **You can't auto-rebuild on recompile from game code (verified dead-end).** The
+  shader-recompile event `EditorEvent.Run("compile.shader")` only dispatches to
+  **editor assemblies** (`assembly.IsEditorAssembly`), and a `[Event("hotloaded")]`
+  static handler in a *game* project assembly **never fires** (confirmed with a
+  diagnostic log). The only hook that works is a project **editor assembly**
+  (`Code/Editor/` → `<pkg>.editor`) with `[Event("compile.shader")]`. For a
+  dev-time-only annoyance it's not worth it — just rebuild manually.
+- **A brand-new `.shader` doesn't index mid-session.** `asset_compilation_control`
+  with an `Assets/…` path returns `asset_not_found` — use the **content-relative**
+  path (`shaders/foo.shader`, no `Assets/`). And a runtime
+  `Material.FromShader("shaders/foo.shader")` evaluated (e.g. in a `static` field)
+  **before that shader first compiles** caches an *invalid* material that renders
+  nothing — so a freshly-added post/blit shader silently "does nothing" until you
+  compile it (correct path) AND hot-reload the C# so the static re-evaluates.
+- **A custom post-process / blit shader that fails to *compile* is the silent
+  killer — nothing surfaces in-game.** `BasePostProcess.Blit` early-outs on
+  `if ( !blit.Material.IsValid() ) return;`, so an invalid material = the whole
+  effect is a no-op with **zero error in the game log**. Root cause is usually a
+  shader compile failure: `Material.FromShader` returns invalid and no `.shader_c`
+  is ever produced.
+  - **Fast diagnosis:** `ls` the shader folder — every healthy custom shader has a
+    sibling `foo.shader_c`. The one effect "doing nothing" is the `.shader` with
+    **no `_c`**. Then `asset_compilation_control("shaders/foo.shader", mode:"compile",
+    full:true)` and read `tail_log(min_level:"trace")` — the tool's `success:true`
+    is **unreliable**; the real verdict is a `Done N combos` line (good) vs an
+    `hlslParser.Parse err: ANTLR - Mismatched Token` warning (bad). `.shader_c` is a
+    gitignored build-on-demand artifact, so a source that never parsed simply never
+    has one.
+  - **`static const` at PS-block scope breaks the VFX HLSL parser.** A line like
+    `static const float3 LUMA = float3( ... );` between the `< Attribute(); Default(); >`
+    globals and the functions throws the ANTLR mismatched-token error above. Use a
+    `#define LUMA float3( ... )` (or a function-local `const`) instead. Verified fix.
+  - **Make the material self-healing, not a one-shot `static readonly`.** Engine
+    effects cache `static Material Shader = Material.FromShader(...)` safely *because
+    engine shaders are always precompiled*; a project shader may not be. Use a lazy
+    getter that re-fetches until valid:
+    `static Material _m; static Material M => _m is {} && _m.IsValid() ? _m : (_m = Material.FromShader(path));`
+    so the effect recovers on its own once the shader compiles, instead of staying
+    dead forever from one bad early init.
+
+## Post-process effects are camera-bound; configure the native stack, don't port a renderer
+
+s&box ships the whole post-process stack as components — `Tonemapping`
+(HableFilmic/ACES + auto-exposure), `Bloom`, `ColorAdjustments`, `AmbientOcclusion`,
+`ScreenSpaceReflections`, `Vignette`, `Sharpen`, `FilmGrain`, `ChromaticAberration`,
+`DepthOfField` — plus `GradientFog` / `VolumetricFogController`+`Volume` / `SkyBox2D`
+(IBL ambient) / `DirectionalLight.FogMode`+`FogStrength` (god-ray shafts). To match a
+"realistic / cinematic" look, CONFIGURE these (and add a custom grade pass) rather than
+porting another engine's renderer — a foreign deferred pipeline won't bind to Source 2's
+forward renderer anyway; only the *techniques + tuning values* transfer.
+
+- **They only apply on the camera they live on** — gathered via
+  `camera.GetComponentsInChildren<BasePostProcess>()`. A runtime/player camera exists
+  only in **Play**, so the effects (and any custom pass) show in Play, not the editor
+  viewport (which renders through its own camera). Lights/fog/sky are scene-global and
+  *do* show in the editor.
+- **Custom pass:** subclass `BasePostProcess<T>`, hold the material in a `static
+  Material.FromShader(...)`, and in `Render()` set `Attributes.Set(...)` then
+  `Blit( BlitMode.WithBackbuffer( mat, Stage.AfterPostProcess, order ), name )`. The
+  shader samples `g_tColorBuffer` (the grabbed backbuffer) at
+  `i.vPositionSs.xy / g_vRenderTargetSize`. Copy `postprocess/pp_color.shader` as the
+  template; `Default3(…)` is valid for `float3 < Attribute >`.
+- **SSAO over-darkens bumpy/displacement geometry** (it self-occludes far more than flat
+  walls) — tessellated terrain reads murky/"darker than the rest" with edge/grid "lines."
+  s&box SSAO is **GTAO** (`gtao_cs.shader`): depth-driven, reading a `NormalsGBuffer` and
+  **reconstructing normals from depth derivatives when that normal is zero**. Things that
+  matter, in order:
+  - **Depth-buffer precision.** GTAO lives or dies on linearized depth. A very low main-camera
+    `ZNear` (e.g. the ~1 used to stop viewmodel clipping — see the viewmodel `ZNear` note above)
+    collapses precision on a large map, so GTAO bands and over-occludes large/distant surfaces
+    (displacements) while close brushwork/props stay clean. Raising `ZNear` toward the 10
+    default is the first thing to try; it trades against viewmodel clipping (decouple them if
+    you need both — keep the world `ZNear` high, solve the gun clip another way).
+  - Radius + intensity: keep modest; large radius darkens terrain more.
+  - **Ruled-out (verified dead-ends, don't repeat):** double-sided / coincident world triangles
+    are **not** the cause — the color pass shades them identically so it's invisible there, and
+    single-siding the geometry changed nothing. Per-material normal smoothing leaves interior
+    displacement verts untouched (single-bucket → unchanged), so it isn't corrupting them either.
+- **A "panel" component that drives the native effects each frame from `[Property]`
+  fields** makes inspector edits live — but then editing the native effect components
+  directly "snaps back" (the panel is the source of truth, re-applying every frame). So
+  expose EVERY knob on the panel, including tonemap `Mode` and `AutoExposureEnabled`,
+  or those become un-changeable. Persist via `Game.Cookies` (the global `Cookie` is
+  obsolete → CS0618).
+
+## Runtime alpha-tested textures need colour-bleed, or mips render them dark
+
+When you build a runtime `Texture.Create(...).WithData(rgba).WithMips()` for an
+**alpha-tested / masked** material (transparent texels alpha 0) and you set those
+transparent texels' RGB to a constant like **black**, bilinear filtering + mip
+generation blend that black into the kept (alpha>0.5) edge texels and **darken
+the surface toward black** — worse the more transparent the texture is (a mostly-
+transparent texture goes near-solid black; a mostly-opaque one looks fine). The
+alpha-test (`clip(a-0.5)`) is correct; the *colour* is the problem.
+
+Fix: **alpha-dilate (colour-bleed)** the texture before `Texture.Create` — flood
+every transparent texel's RGB with its nearest opaque neighbour's colour (a
+multi-source BFS from all opaque texels is O(pixels)); leave alpha at 0 so the
+cut-out is unchanged. Now filtering/mips never sample the constant fill colour.
+This is the standard "alpha bleeding"/dilation step; do it for any masked runtime
+texture, not just at mip 0 (lower mips average the whole image).
+
 ## schema_signature can't serialize overloaded members
 
 - `schema_signature(type, member)` on a method with multiple overloads
@@ -358,6 +659,17 @@ they don't know to expect them.
 - To unstick / toggle a component live, use `gameobject_set_component_enabled`
   (fires OnEnabled/OnDisabled). This is also the only reliable way to flip a
   component on/off from the bridge — see the bool limitation below.
+- **Reproduce a per-asset bug by driving the asset selector, not by waiting for
+  RNG.** If a component picks its asset from a string `[Property]` (a model name,
+  a sound path) and reloads on change, `set_property` it directly (strings DO
+  coerce) to force-load the exact problem asset — even bounce A→B→A to force a
+  rebuild when it's already on A. This let a "some downloaded player models are
+  black" bug be reproduced on demand (set `PlayerModel.ModelName`) instead of
+  re-rolling a random spawn. Pair it with a **temporary decode `Log.Info`** in
+  the loader (dump per-texture/per-mesh stats, then read `tail_log`): that proved
+  the textures decoded fine and the black was the **toon outline**, not the
+  texture pipeline — a conclusion no amount of staring at code would have given.
+  Remove the log after.
 
 ## set_property can't coerce bool or Vector3
 
@@ -369,7 +681,37 @@ they don't know to expect them.
   either. Workarounds: toggle a whole component with
   `gameobject_set_component_enabled`; for other bools, change the field's
   default in code + hotload, or drive it from a `[ConCmd]` via
-  `run_console_command`. Strings/enums/Guids/numbers set fine.
+  `run_console_command`. Strings/enums/Guids set fine.
+- **`float`/numeric `[Property]`s ALSO frequently fail** the same way: a JSON
+  number arrives stringified and `set_property` returns `coerce_failed: could
+  not convert to System.Single ... target element has type 'String'`. So you
+  generally **cannot live-tune a `[Property] float` over the bridge** (exposure,
+  widths, intensities). Don't burn turns trying — to iterate a float you can't
+  see, bake it into the code default + hotload, or (for a self-applying
+  component) press a `[Button]` like "Reset to Default" via `invoke_button`,
+  and have the user eyeball + report the value. The reliably-settable types are
+  **string / Guid / enum** only.
+- Asset-handle properties (e.g. `SkinnedModelRenderer.Model`) **also** can't be
+  set via `set_property` — a path string fails coercion (`could not convert to
+  Sandbox.Model`). So you can't build a model object purely over the bridge
+  (`gameobject_create` + `gameobject_add_component(SkinnedModelRenderer)` +
+  set `Model`) — the model assignment is the step that fails. And
+  `drop_asset_into_scene` only resolves **project** assets, not **mounted
+  package** assets (returns `asset_not_found`), so it can't spawn a v_ weapon
+  model from a mounted cloud package. Net: a downloaded/mounted model with an
+  animgraph is effectively **not** instantiable-for-inspection over the bridge —
+  test it through the actual game code path instead.
+- **Changing a code default does NOT update an already-loaded scene/session.** A
+  `[Property]` that's serialized in the `.scene` masks the code default, and the open
+  edit session holds the value it deserialized at scene-open. So: editing the code
+  default, editing the `.scene` file on disk, and (per above) `set_property` for a float
+  all leave the **running** value unchanged. Symptom that wastes turns: "I set X but
+  reload/Play still shows the old value." Only a **fresh load** applies a new default —
+  i.e. an **editor restart** (re-reads scene/defaults) or the user **dragging the
+  inspector slider** (the one reliable way to set a live float). When you change a
+  look-critical default, tell the user it needs a restart/slider, don't assume your edit
+  took. (And don't let them save the scene first — an in-memory stale value would
+  overwrite your disk edit.)
 
 ## Custom rendering (Graphics.Draw / SceneCustomObject)
 
@@ -410,6 +752,47 @@ they don't know to expect them.
   `Components.Create<T>( false )` → set properties → `component.Enabled = true`.
   (Or do the load in `OnStart`, which is deferred to the first tick.) Easy to
   miss when another call site happens to use defaults that match.
+
+## A cached `Texture` handle goes invalid after a hotload or asset re-import
+
+A `static Texture _tex` loaded once behind a one-shot latch (`if (!_tried) { _tried = true; _tex = Texture.Load(path); }`) **silently breaks** when the source image is re-imported (you edited/regenerated the PNG) or after some hotloads: the cached handle now points at a disposed texture, so `_tex.IsValid()` is false and your draw early-outs to *nothing* — even though a fresh `Texture.Load` of the same path works (which is why a bridge `texture_get_info` looks healthy while the UI shows blank). Symptom: a HUD icon/material that worked, then vanished right after you reprocessed its image. Fix: make the load **self-healing**, not latched — `if (!_tex.IsValid()) _tex = Texture.Load(path, warnOnMissing:false);` — so it re-acquires whenever the handle is null/stale, and caches once valid (no per-frame churn). Same pattern as the self-healing `Material.FromShader` getter under the shader-recompile gotcha.
+
+## Runtime-generated textures/materials are cached for the whole session
+
+A `[Property]` that feeds `Texture.Create` / `Material.Create` at build time (e.g. a
+"normal-map strength" that regenerates normal maps from albedo) **won't visibly change
+when you tweak it and rebuild within the same session** — the engine caches the
+generated textures/materials, so a rebuild (e.g. a "Reload Map" button that news up a
+fresh provider) reuses the first build's results. Symptom: "this slider does nothing."
+Only a **fresh process** (editor restart → first-ever generation) picks up the new
+value. So for these, treat the slider as restart-only: change the value, restart. (This
+is separate from, and compounds with, the `[Property]`-float bridge/serialization traps
+above — together they make "live-tuning a generated-asset knob" basically impossible
+without a restart.)
+
+## Citizen cosmetics (.clothing) and attaching them to non-citizen skeletons
+
+- s&box cosmetics are `Clothing` **GameResources** (`.clothing`, ext lives in
+  `engine/.../Game/Avatar/Clothing.cs`). The core field is `Model` (a `vmdl`); the rich
+  `ClothingCategory` enum has `Hat`/`HatBeanie`/`Hair`/`Facial`/… Dressing
+  (`ClothingContainer.Dressing.cs`) attaches each item by creating a child
+  `SkinnedModelRenderer` with `r.BoneMergeTarget = body` — i.e. **bonemerge, matched by
+  bone name**. ~37 hat models ship under `addons/citizen/.../hat/` (always mounted).
+- **Bonemerge only works if the skeletons share bone names.** Citizen hats are rigged to
+  the *citizen* head bone, so they will NOT bonemerge onto a Valve-biped / GoldSrc
+  skeleton (`Bip01 Head`). To wear a citizen hat on a foreign skeleton, don't bonemerge —
+  load the hat on its own no-animgraph renderer and **snap it to the head bone each frame**
+  by world transform with a tunable local offset (find the bone by name; read its world
+  transform from your own FK on an override-driven path, else
+  `Renderer.TryGetBoneTransform`). Same pattern works for any prop-on-bone (weapon-in-hand,
+  hat-on-head). One global offset usually fits all hats (they share the citizen-head
+  rigging); per-item offsets are overkill unless the meshes differ a lot.
+
+## Inverted-hull toon outline: black hull pokes through layered models
+
+A classic toon outline = a second renderer of the same model, every vertex pushed out along its normal, `CullMode FRONT`, drawn solid black → a thin silhouette. On **layered** models (a body mesh hugging just under clothing — common on community GoldSrc/anime player models) the inner mesh's expanded black hull pokes *through* the outer surface as **vantablack patches**, and **no `OutlineWidth` avoids it** (shrinking the hull just thins the patches; tightly-layered meshes sit sub-millimeter apart). The robust fix is **depth**, not width: push the hull **back in depth** in the outline VS so the model's own surface occludes it everywhere except true silhouette edges (where nothing is in front). Source 2 is **reverse-Z** (NDC z: 1=near, 0=far), so *farther* = smaller z: `i.vPositionPs.z -= bias * i.vPositionPs.w;` after `Position3WsToPs`. Expose `bias` as a tunable with a **signed** range so the user can flip it if your reverse-Z assumption is backwards. This makes outline width purely cosmetic (boldness) again. Separately, a model's flat pure-black texels (`black.bmp` straps/boots) render as a black void because `albedo 0 × lighting = 0` regardless of any min-brightness floor — give the lit shader a small **albedo floor** (`max(albedo, ~0.06)`) so they read as dark material that still catches light/rim.
+
+**Also: the outline must alpha-clip the SAME masked/transparent texels as the body, or you get "black instead of transparency."** A masked GoldSrc skin (e.g. `Furrycomm.bmp`, texture flag `0x40`) decodes its color-keyed texels to alpha 0, and the body shader `clip(albedo.a - 0.5)`s them out. But if the outline shader just paints the hull solid black (never samples the texture), the black back-hull shows *through* the body's transparent areas → solid black where it should be see-through. Fix: bind the masked albedo to the outline material and `clip(Tex2DS(g_tColor, g_sAniso, uv).a - 0.5)` in the outline PS too (default the texture white so opaque models never clip). Caveat: a single shared `MaterialOverride` outline clips all meshes against one texture — fine for single-masked-texture models; multi-texture needs per-mesh outline materials.
 
 ## Misc bridge quirks seen this session
 
