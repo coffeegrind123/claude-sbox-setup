@@ -83,17 +83,17 @@ they don't know to expect them.
   It is **not** `Sandbox.Scene.Active` (no such property) and **not**
   `Scene.All` (that collection filters out editor scenes — see
   `Scene.Static.cs`).
-- `set_property` can fail silently. The handler's response includes
-  both `previous` and `current` values — if they're equal after a
-  write, the write didn't take. Always confirm with a `get_property`
-  read-back. The underlying engine bug lives in
-  `TypeSerializedProperty.SetValue<T>` (`engine/Sandbox.Tools/Utility/ReflectionSerializedObject.cs:89`):
-  when `T` is inferred from the argument (e.g. `JsonNode`), the
-  generic falls through to the silent `else return;` branch because
-  `JsonNode` is neither `IConvertible` nor assignable to the target
-  CLR type. This addon's handler coerces values to the target type
-  first to dodge the bug — if you ever see a silent set regress,
-  that coercion is the prime suspect.
+- `set_property` can still report `ok:true` while the value doesn't change —
+  the response includes both `previous` and `current`; if they're equal after a
+  write, the write didn't take. Always confirm with a read-back. **Two distinct
+  causes, don't conflate them:** (1) the property is a **runtime-only** field
+  (e.g. `Rigidbody.Velocity`) that no-ops in edit mode — expected, not a bug;
+  (2) a genuine coercion miss (now rare — see the "set_property coercion" section
+  below; bool/Vector3/float/asset-handles were fixed 2026-06 via a schema
+  type-union + `JsonCoerce.Unwrap`). Note: `TypeSerializedProperty.SetValue<T>`
+  (`ReflectionSerializedObject.cs:89`) dispatches on `value.GetType()`, so a
+  correctly-boxed value sets fine — it was never the culprit; the old failure was
+  the transport stringifying untyped `value` args.
 - `model_list_body_groups` takes a `path` parameter (e.g.
   `models/citizen/citizen.vmdl`), **not** a `model` parameter.
   Same goes for `model_list_bones`, `model_list_attachments`,
@@ -287,34 +287,26 @@ data (`[Button] Reload`, re-run the generator) rather than trusting the hotload.
 
 ## Bridge tool reliability
 
-- `editor_state` can hard-fail with `NotImplementedException: Unable to
-  upgrade delegate methods without declaring types` and **stay broken
-  across an editor restart** (observed on claude-sbox v0.0.109) — it's
-  not a transient hotload blip, it's the handler tripping the engine's
-  hotload upgrader on a delegate it serializes. When this happens,
-  route around it: `get_active_scene` (scene name + source path),
-  `compile_check_build_state` (build state), `ping` (liveness), and
-  `game_action_list` (errors `not_in_play_mode` when stopped, succeeds
-  when playing) together reconstruct everything `editor_state` would
-  have told you. `doctor` also still works.
-- `set_property` only coerces **string-like** values reliably: `string`,
-  `Guid`, and enums-as-string work. **`Vector3` AND `bool` both FAIL** with
-  `coerce_failed: ... requires an element of type 'Object'/'Boolean', but
-  the target element has type 'String'` (the value arrives as a string and
-  the coercer won't convert it). For Vector3 every form was rejected
-  (`{"x":..}`, `"x,y,z"`, `[x,y,z]`); bool `"true"` is rejected too. So you
-  **cannot toggle a `[Property] bool` or set a `Vector3`** from the bridge —
-  drive those from code (a sibling test component, or a `[ConCmd]`), or via
-  the inspector UI. Combined with no input-injection (`send_keys` doesn't
-  reach game input), key-bound toggles aren't bridge-testable; validate
-  their effect by other means (e.g. a mirror/replica object).
-  So you **cannot drive a player's `Velocity`/`WorldPosition` from the
-  bridge** to script a motion test — there's no input-injection path
-  either (`send_keys` posts Qt events the game-input layer ignores).
+- `editor_state` was observed to hard-fail once with `NotImplementedException:
+  Unable to upgrade delegate methods without declaring types` and stay broken
+  across a restart (**claude-sbox v0.0.109 only** — verified working in current
+  builds). If it ever recurs, route around it: `get_active_scene` (scene name +
+  source path), `compile_check_build_state` (build state), `ping` (liveness), and
+  `game_action_list` (errors `not_in_play_mode` when stopped, succeeds when
+  playing) together reconstruct everything `editor_state` would have told you.
+  `doctor` also still works.
+- `set_property` now coerces **bool / Vector3 / float / Color / asset-handle**
+  values correctly (fixed 2026-06 — see the dedicated "set_property coercion"
+  section below for the full story and the still-true caveats). The old
+  "only string/Guid/enum work" limitation is **gone**; don't drive bools/floats
+  from a `[ConCmd]`/sibling-component just to dodge it.
+- **No game-input injection** (`send_keys` posts Qt events the game-input layer
+  ignores), so you still **cannot script a player-motion test** (WASD/jump/stairs)
+  or exercise a key-bound toggle from the bridge — and `Rigidbody.Velocity` /
+  `WorldPosition` writes no-op in edit mode (runtime-physics props need Play).
   Validate at-rest invariants (grounded, no drift, no fall-through) via
-  `get_property`, and hand dynamic feel tests (WASD/jump/stairs) to the
-  user. If you must move something, a sibling test component that sets
-  the value in code (then hotload) is the workaround.
+  `get_property`, and hand dynamic feel tests to the user. To move something for
+  a test, a sibling component that sets it in code (then hotload) still works.
 - After a burst of source edits, the editor drains a queue of recompiles
   and the scene can repeatedly re-bootstrap (any self-spawning
   `OnActive` scene gets new GameObject ids each pass). Targeted
@@ -689,36 +681,42 @@ texture, not just at mip 0 (lower mips average the whole image).
   texture pipeline — a conclusion no amount of staring at code would have given.
   Remove the log after.
 
-## set_property can't coerce bool or Vector3
+## set_property coercion: bool / Vector3 / float / asset-handles ALL work (fixed 2026-06)
 
-- `set_property` only coerces **string / Guid / enum / number**. Passing a
-  JSON `true` for a `bool [Property]` fails with `coerce_failed` ("target
-  element has type 'String'" — the bridge stringifies the value). Same for
-  `Vector3`. There is no clean per-property path for these: a `[Property]`
-  bool doesn't render as an individually `find_widget`-addressable checkbox
-  either. Workarounds: toggle a whole component with
-  `gameobject_set_component_enabled`; for other bools, change the field's
-  default in code + hotload, or drive it from a `[ConCmd]` via
-  `run_console_command`. Strings/enums/Guids set fine.
-- **`float`/numeric `[Property]`s ALSO frequently fail** the same way: a JSON
-  number arrives stringified and `set_property` returns `coerce_failed: could
-  not convert to System.Single ... target element has type 'String'`. So you
-  generally **cannot live-tune a `[Property] float` over the bridge** (exposure,
-  widths, intensities). Don't burn turns trying — to iterate a float you can't
-  see, bake it into the code default + hotload, or (for a self-applying
-  component) press a `[Button]` like "Reset to Default" via `invoke_button`,
-  and have the user eyeball + report the value. The reliably-settable types are
-  **string / Guid / enum** only.
-- Asset-handle properties (e.g. `SkinnedModelRenderer.Model`) **also** can't be
-  set via `set_property` — a path string fails coercion (`could not convert to
-  Sandbox.Model`). So you can't build a model object purely over the bridge
-  (`gameobject_create` + `gameobject_add_component(SkinnedModelRenderer)` +
-  set `Model`) — the model assignment is the step that fails. And
-  `drop_asset_into_scene` only resolves **project** assets, not **mounted
-  package** assets (returns `asset_not_found`), so it can't spawn a v_ weapon
-  model from a mounted cloud package. Net: a downloaded/mounted model with an
-  animgraph is effectively **not** instantiable-for-inspection over the bridge —
-  test it through the actual game code path instead.
+**This is now fixed** — earlier builds couldn't set bool/Vector3/float/asset-handle
+`[Property]`s over the bridge; that limitation is gone. If you hit a stale write,
+re-read this whole bullet before assuming it's broken.
+
+- **Root cause (for the record, so nobody re-diagnoses it wrong):** the failure was
+  **not** an engine bug in `TypeSerializedProperty.SetValue<T>` (that method dispatches
+  on `value.GetType()`, so a correctly-boxed value sets fine). It was the **MCP transport
+  stringifying any tool argument whose inputSchema property has no declared `type`** — the
+  polymorphic `value` arrived as a JSON *string* (`"false"`, `"3.5"`, `"{\"x\":1}"`), so
+  every coercer branch that called `GetBoolean()`/`GetDouble()`/`GetProperty("x")` threw
+  `coerce_failed: ... target element has type 'String'`. Only `GetString()`-based branches
+  (string/Guid/enum-by-name) survived — which is why those always worked.
+- **The fix** (claude-sbox addon): the polymorphic `value` params now declare a JSON-Schema
+  type-union (`type: ["boolean","number","string","object","array","null"]`) so the client
+  stops stringifying them, plus a defensive `JsonCoerce.Unwrap` re-parses any still-stringified
+  payload. Applies to `set_property`, `set_preference`, `cookie_set`,
+  `material_set_shader_parameter`, `set_widget_value`, `tab_select`,
+  `select_dropdown_option`, `set_color`.
+- **What you can now do directly:** set a `[Property] bool` (`value: false`), a
+  `[Property] float` (`value: 3.5`), a `Vector3` (`value: {x,y,z}`), a `Color`
+  (`{r,g,b,a}`), and an **asset handle** — pass a content path string for a
+  `Model`/`Material`/etc. property (`set_property(..., "Model", "models/dev/box.vmdl")`
+  resolves via the resource type's static `Load(string)`). enum-by-name / Guid / string
+  still work as before. **Always still verify** `previous` vs `current` (good practice).
+- **Genuinely-still-true caveats (NOT coercion failures):**
+  - **Runtime-only physics props no-op in edit mode.** `Rigidbody.Velocity` /
+    `AngularVelocity` accept the write (`ok:true`, no error) but read back unchanged when
+    not playing — the `PhysicsBody` doesn't exist until Play. Use a *serialized* field
+    (e.g. `MassCenterOverride`) to prove coercion; expect runtime-physics setters to be
+    inert at edit time.
+  - **`drop_asset_into_scene` still only resolves *project* assets**, not **mounted
+    package** assets (returns `asset_not_found`) — but you can now `gameobject_create` +
+    `gameobject_add_component(SkinnedModelRenderer)` + `set_property("Model", "<path>")`
+    to build a renderer over the bridge, including for a mounted-package model path.
 - **Changing a code default does NOT update an already-loaded scene/session.** A
   `[Property]` that's serialized in the `.scene` masks the code default, and the open
   edit session holds the value it deserialized at scene-open. So: editing the code
@@ -873,10 +871,11 @@ when you tweak it and rebuild within the same session** — the engine caches th
 generated textures/materials, so a rebuild (e.g. a "Reload Map" button that news up a
 fresh provider) reuses the first build's results. Symptom: "this slider does nothing."
 Only a **fresh process** (editor restart → first-ever generation) picks up the new
-value. So for these, treat the slider as restart-only: change the value, restart. (This
-is separate from, and compounds with, the `[Property]`-float bridge/serialization traps
-above — together they make "live-tuning a generated-asset knob" basically impossible
-without a restart.)
+value. So for these, treat the slider as restart-only: change the value, restart. (Note:
+`set_property` *can* now write the float over the bridge — but it still won't take effect,
+because the cached generated asset isn't regenerated mid-session. This is the
+**serialization/caching** trap, independent of coercion: the value sets, the *output*
+doesn't change until a fresh process.)
 
 ## Citizen cosmetics (.clothing) and attaching them to non-citizen skeletons
 

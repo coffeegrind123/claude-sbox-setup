@@ -40,7 +40,7 @@ If `sbox_status` reports `connected=false`, the editor isn't running or the brid
 |---|---|
 | Translating a Unity pattern to s&box | `references/unity-translation.md` |
 | The Ten Rules of s&box (lifecycle, networking, async) | `references/ten-rules.md` |
-| Common gotchas (namespace surprises, signature traps, silent set_property failures, set_property can't coerce bool/Vector3, bone GET=world vs SET=model space, Components.Get skips disabled, live runtime debugging, screenshot location, sdocs privacy, codesearch driver lifecycle + privacy, auto_* naming, widget_drag rejections) | `references/gotchas.md` |
+| Common gotchas (namespace surprises, signature traps, set_property coercion — bool/Vector3/float/asset-handles now work, runtime-only props no-op in edit mode, bone GET=world vs SET=model space, Components.Get skips disabled, live runtime debugging, screenshot location, sdocs privacy, codesearch driver lifecycle + privacy, auto_* naming, widget_drag rejections) | `references/gotchas.md` |
 | Bodygroups: hiding/showing body parts on models (e.g. citizen) | `references/bodygroups.md` |
 | Inspecting/editing an **animation graph** (`.vanmgrph`): find what drives an animation, disable a state-machine transition, change a node's sequence, add/connect nodes | Don't read a file: `animgraph_source_inspect(path)` to map nodes/connections/parameters/state-machines, then the `animgraph_edit_*` session tools (`_load` → mutate → `_verify` → `_save`) + `animgraph_set_node_property` / `animgraph_set_transition_disabled` / `animgraph_connect` / `animgraph_add_node`. Operates on the KV3 source — **not** `nodegraph_*` (that's ActionGraph/ShaderGraph only). See `references/tool-families.md` § Animation. |
 | Live MCP tools you can call (curated, with usage stories) | `references/mcp-tools.md` |
@@ -78,7 +78,7 @@ When the user asks you to change a value in the inspector ("set the player speed
 
 1. `get_selection` to see what's selected.
 2. `get_components(id)` to enumerate.
-3. `set_property(id, component_index, name, value)`: runs through the editor's undo scope, so the user sees a normal undoable change. **Always verify**: the response includes `previous` and `current` values. If they're equal, the change didn't take: follow up with `get_property` to confirm.
+3. `set_property(id, component_index, name, value)`: runs through the editor's undo scope, so the user sees a normal undoable change. Handles every common type — `bool` (`true`/`false`), numbers, `Vector3`/`Color` (`{x,y,z}`/`{r,g,b,a}`), enum-by-name, and **asset handles** (pass a content-path string for a `Model`/`Material`, e.g. `"models/dev/box.vmdl"`). **Always verify**: the response includes `previous` and `current`. If they're equal, either the write missed or the property is **runtime-only** (e.g. `Rigidbody.Velocity` no-ops in edit mode) — confirm with `get_property` and, for runtime props, test in Play.
 
 When the user asks you to *write* code, prefer `Read`/`Edit`/`Write` against the bind-mounted source tree (your cwd is the s&box project root), then call `recompile` (when implemented) or tell the user to trigger a hot-reload.
 
