@@ -771,6 +771,96 @@ texture, not just at mip 0 (lower mips average the whole image).
   (Or do the load in `OnStart`, which is deferred to the first tick.) Easy to
   miss when another call site happens to use defaults that match.
 
+## Cloning a prefab reference: base-addon / resource prefabs are DISABLED templates
+
+A prefab `GameObject` you get from a **resource** — e.g. a `Surface`'s
+`PrefabCollection.BulletImpact`, or any base-addon impact/effect prefab — is a
+**disabled template**. `prefab.Clone( pos, rot )` **inherits that disabled state**,
+so the clone is **inert**: it never renders, AND none of its components update —
+including `TemporaryEffect`, which means the clone **never self-destructs**, so the
+scene hierarchy steadily fills with dead clones. Real symptom hit this session:
+spawning a surface's bullet-impact prefab gave "no particles, no decal, and the
+hierarchy is riddled with `default-bullet` objects." Fix — clone with an explicit
+`StartEnabled`:
+
+```csharp
+var go = prefab.Clone( new CloneConfig {
+    StartEnabled = true,
+    Transform = new global::Transform( pos, rot ),
+    Name = "impact",
+} );
+go.NetworkMode = NetworkMode.Never; // local cosmetic spawned per-peer; don't replicate
+```
+
+Note: project prefabs assigned in the **inspector** (a `[Property] GameObject`) are
+usually already enabled, so their `.Clone(pos,rot)` works — it's the
+**resource-loaded** prefab references (`Surface.PrefabCollection.*`,
+`ResourceLibrary.Get<Prefab>`-style) that bite. When the same cosmetic is spawned on
+every client via a broadcast RPC, also set `NetworkMode.Never` so the host doesn't
+replicate a copy on top.
+
+## Blood / impact effects: there's no C# API — it's the Surface prefab system, tuned on the clone
+
+s&box has **no built-in blood or "TraceAttack" C# system** (grepping the whole engine,
+"blood" is only an emoji + an icon). Damage code is expected to spawn the visual itself.
+The mechanism is the **`Surface` resource's impact prefabs**:
+
+```csharp
+public SurfacePrefabCollection PrefabCollection;  // on every .surface
+//   .BulletImpact : GameObject   // prefab spawned on a bullet hit (decals + particles + sound)
+//   .BluntImpact  : GameObject   // melee / blunt hit
+```
+
+The base addon ships one prefab per material (`prefabs/surface/{metal,wood,glass,…,flesh}_bullet.prefab`)
+and the matching `.surface` (`Assets/surfaces/*.surface`). **Blood is just the flesh one**:
+`flesh.surface` → `flesh_bullet.prefab`, which is a `TemporaryEffect` (auto-cleanup) + a `Decal`
+(random flesh splat) + several `ParticleEffect` children (`impact.flesh.mist` cloud, `blood.squirt`
+jet, `blood droplets`). Spawn it for a player hit by cloning that prefab (see the disabled-template
+gotcha above for the `StartEnabled` requirement) at the hit point, forward = travel direction.
+
+**Modern particles are component-based, NOT `.vpcf`:** a `ParticleEffect` + emitter
+(`ParticleConeEmitter`, …) + renderer (`ParticleSpriteRenderer`) on a GameObject. The legacy `.vpcf`
+route still exists (`LegacyParticleSystem` component + `ParticleSystem.Load("…vpcf")` +
+`SceneParticles`/`SetControlPoint`), but the base addon's blood/impacts use the component system, so
+there is **no blood `.vpcf` to load** — you tune the cloned components.
+
+**Tuning a cloned base-addon effect** (e.g. "the blood cloud lingers / drowns out the spray"): set the
+knobs on the clone **right after `Clone()`** — it's synchronous, before the emitters' first tick, so it
+takes. Match the right sub-effect by its child GameObject `Name`:
+
+```csharp
+foreach ( var pe in go.Components.GetAll<ParticleEffect>( FindMode.EverythingInSelfAndDescendants ) )
+    pe.Lifetime = new ParticleFloat( 0.4f, 0.55f );          // base flesh = 2-3s → cloud hovered forever
+foreach ( var em in go.Components.GetAll<ParticleConeEmitter>( FindMode.EverythingInSelfAndDescendants ) )
+    if ( em.GameObject.Name.Contains( "mist", StringComparison.OrdinalIgnoreCase ) )
+        em.Burst = 2;                                         // thin the "cloud"; bump "squirt" similarly
+foreach ( var te in go.Components.GetAll<TemporaryEffect>( FindMode.EverythingInSelfAndDescendants ) )
+    te.DestroyAfterSeconds = 0.9f;                            // it also WaitForChildEffects, so shorten Lifetime too
+```
+
+- `ParticleEffect.Lifetime`, and `ParticleEmitter.Burst`/`Rate`/`Duration` (on the **base** emitter
+  class, so `ParticleConeEmitter` inherits them), are all `ParticleFloat` — which has an implicit
+  `float` conversion and a `new ParticleFloat(a,b)` **range** ctor (Evaluation=Seed). Assigning an `int`
+  works via int→float→ParticleFloat.
+- `TemporaryEffect.DestroyAfterSeconds` + `WaitForChildEffects` control the GameObject's self-destruct;
+  it waits for child particles, so to actually shorten the effect you must cut the particle `Lifetime`
+  too, not just `DestroyAfterSeconds`.
+- It's a local cosmetic: clone with `NetworkMode.Never` and spawn it from a broadcast RPC on the
+  shooting client / host so every peer makes its own (don't replicate). One effect per *shot*, not per
+  pellet, reads better and is cheaper.
+
+## "Whitelist violation(s), build unsuccessful" is NOT a compile error (and the MCP says Success)
+
+The MCP `compile_project` reports `succeeded: true` for a clean **C#** compile, but
+s&box runs a **separate access-list (whitelist) gate** when loading the assembly into
+the sandbox. A non-whitelisted API call passes the C# compile yet logs
+`Whitelist violation(s), build unsuccessful.` (category `Compiler/local.<proj>`) and
+the **previous assembly keeps running** — so your new code silently doesn't take
+effect (you debug a "bug" in code that never loaded). Always confirm a real load via
+`tail_log(min_level:"warning")` after compiling: a *fresh* whitelist error (newer
+`seq`/`ts` than your edit) means find the blocked call; *stale* ones with old `seq`
+are leftovers from earlier broken intermediate saves and can be ignored.
+
 ## A cached `Texture` handle goes invalid after a hotload or asset re-import
 
 A `static Texture _tex` loaded once behind a one-shot latch (`if (!_tried) { _tried = true; _tex = Texture.Load(path); }`) **silently breaks** when the source image is re-imported (you edited/regenerated the PNG) or after some hotloads: the cached handle now points at a disposed texture, so `_tex.IsValid()` is false and your draw early-outs to *nothing* — even though a fresh `Texture.Load` of the same path works (which is why a bridge `texture_get_info` looks healthy while the UI shows blank). Symptom: a HUD icon/material that worked, then vanished right after you reprocessed its image. Fix: make the load **self-healing**, not latched — `if (!_tex.IsValid()) _tex = Texture.Load(path, warnOnMissing:false);` — so it re-acquires whenever the handle is null/stale, and caches once valid (no per-frame churn). Same pattern as the self-healing `Material.FromShader` getter under the shader-recompile gotcha.
@@ -1009,3 +1099,12 @@ When you add a `Feature`/`StaticCombo` to an **existing** project shader (one th
 
 ## Pasted / downloaded "wav" (or other source) assets can be gzip-compressed — compile fails cryptically
 A source asset that won't compile (`asset_get_compile_status` → `is_failed:true`, no `*_c`) may not be the format its extension claims. Check the magic bytes: `head -c4 file.wav | xxd` — `RIFF` = real WAV, **`1f 8b`** = gzip. Fix: `zcat in.wav > out.wav` (verify it now starts `RIFF`), then `register_asset_file` again. The **`register_asset_file` → `asset_get_compile_status`** loop is the way to add raw assets (wav/png/tga) over the bridge and confirm each produced a compiled `*_c` before referencing it from a `.sound`/material.
+
+## `IgnoreGameObject` ignores only the ROOT — an eye-origin trace starts SOLID inside the player's own collider
+A trace started at the player's eye (`Weapon_ShootPosition`-style muzzle/spawn/aim traces) begins **inside the player's own collider**. If that collider is a **child** GameObject — which it usually is (a dedicated "Hitbox" child holding the `BoxCollider`, a separate body collider, etc.) — then `Scene.Trace…IgnoreGameObject(player)` does **NOT** skip it: `IgnoreGameObject` excludes only that single object's own colliders, not its descendants'. The trace **starts solid**, returns `fraction 0` / `HitPosition == start`, and any code that does `if (tr.Hit) pos = tr.EndPosition;` silently **collapses the spawn/aim point back onto the eye**.
+- **Real symptom (MGE rocket launcher):** the launcher's right-shoulder muzzle offset `(23.5, 12, -3)` was computed correctly, but the brush-only eye→muzzle pullback trace started solid in the player's Hitbox child → spawn snapped to the eye → every rocket fired from dead-center regardless of the offset. The offset value was right; the trace was erasing it. Caught only by logging the *post-trace* spawn position (`rightDist=0` when it should be ~12).
+- **Fix:** use **`IgnoreGameObjectHierarchy(player)`** (skips the root AND all child colliders) for any trace originating at/near the player. Belt-and-suspenders: also `.WithoutTags("player","hitbox")` if you tag your hitboxes. Reserve plain `IgnoreGameObject` for cases where you genuinely want only the one object skipped.
+- **Tell:** "the offset/aim is in the code but has zero effect at runtime," or a spawn that's always exactly at the origin. Log the value *after* every trace that can rewrite it; a `0.0` lateral component on a supposedly-offset point means a start-solid pullback. This also applies to projectile *movement* traces (ignore the shooter's whole hierarchy, or a point-blank shot hits the shooter's own hitbox child at the muzzle).
+
+## Add a throwaway fire-path / event log to find "value is correct but has no effect" bugs (bridge can't inject input)
+The bridge cannot inject fire/mouse/movement, so a gameplay path that only runs on player input (weapon fire, melee, jump) can't be exercised from the MCP. When such a path misbehaves, add a **one-line `Log.Info($"[TAG] …")`** dumping the suspect values at the decision point, recompile, have the human trigger it once, then read it back with **`tail_log(min_level:"info")`** (filter your `[TAG]`). This turns "I think it's X" into ground truth in one round-trip. Log the values *after* every transform/trace that could mutate them (not just at compute time), include any cached-component null-state, and **remove the log once confirmed.** (It's how the rocket-spawn-collapse bug above was localized: the offset logged as 12 but the post-trace `rightDist` logged as 0.)
