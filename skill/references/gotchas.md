@@ -109,6 +109,18 @@ they don't know to expect them.
   identifier from your code. Override the base URL via an env var on
   the editor process or through
   `game/data/claude-sbox-config.json` (`claude-sbox.sdocs_base_url`).
+- `codesearch_*` queries also leave the machine, and the driver has a
+  lifecycle. The tools live-scrape sbox.game/codesearch (a Blazor
+  Server SPA) via a headless Chromium, so query strings hit the
+  network — same privacy posture as `sdocs_*`: don't pass verbatim
+  private-source identifiers. The driver is a prebuilt DLL loaded
+  from `<game>/.claude-sbox/codesearch-driver/runtime/`; if a call
+  returns `codesearch_driver_unavailable`, run `codesearch_install_driver`
+  once (needs the .NET SDK) and retry — it loads lazily, no restart.
+  But a `codesearch_install_driver force:true` REBUILD over an
+  already-loaded driver needs an **editor restart** to take effect
+  (`Assembly.LoadFrom` caches the assembly for the process lifetime).
+  Run `codesearch_status` to see `driver_loaded` / `load_error`.
 - `auto_*` tool names use underscores **only**. The conceptual
   identity returned by `auto_list` is `auto:Editor.EditorScene.Copy`,
   but the actual MCP tool name is `auto_Editor_EditorScene_Copy`
@@ -959,3 +971,41 @@ Two ways around it:
      runtime (e.g. hashed from the player's model).
    - CFF/OpenType-PostScript outlines (`CFF `/`CFF2` table, no `glyf`) need a separate Type2 charstring
      interpreter — check your catalogue's sfnt version first. (mixfont's are all `glyf`.)
+
+## A mid-session-added `.shader` will NOT bind via runtime `Material.Create` — pink forever (even after restart)
+
+Distinct from the stale-handle pink above, and far nastier: a shader **added (or first compiled) during a running editor session** comes back as the **pink error material** from `Material.Create( name, "shaders/new.shader" )` **even when it compiles cleanly** (`new.shader_c` present, no ANTLR errors) — and **a full editor restart does NOT fix it**. Lost a long session to this; the fix is to not use a new shader at all.
+
+- **Only shaders that were built into the ORIGINAL project load reliably at runtime.** A map's own `goldsrc.shader`/`bsp_prop.shader` (present when the project was first built) resolve fine; a freshly-added `grass.shader` — same `Assets/shaders/` folder, valid `grass.shader_c` on disk — renders pink. The runtime shader registry is populated from the project build; a shader dropped in afterwards isn't in it.
+- **Out-of-process compiles don't register it.** `asset_compilation_control(..., mode:"compile")` emits the `.shader_c` but does **not** add the shader to the running editor's runtime registry.
+- **The editor's file-watcher won't auto-compile your source edits.** Writing a project `.shader` (via the bridge / any external write) does **not** fire `compile.shader` — `wait_for_compile_shader` just expires. So the documented "edit `goldsrc` → editor recompiles → Reload Map" flow only triggers when the **editor itself** saves the file, not when you write it underneath the editor.
+- **Base-addon `DevShader = true` shaders are doubly broken at runtime.** Copying e.g. `foliage.shader` in doesn't help, and DevShaders compile combos on-demand in the editor — so a runtime `Material.Create` + `SetFeature` selecting a combo that was never precompiled returns the error material too. (Removing `DevShader` and recompiling still didn't register it — see above.)
+- **Practical rule — for anything built with runtime `Material.Create`, render with a shader that SHIPPED with the project build.** Need a new look? Add a `Feature`/`StaticCombo` to an **existing** project shader (default-off so other consumers' combos are unchanged) rather than a new `.shader` file; or commit the new shader and do a clean project build so it's in the registry from the start. Worked example: `goldsrc.shader` already exposes `F_ALPHATEST` (`clip( Color.a - 0.5 )`), so alpha-cut foliage/grass cards render on it (lit, non-pink) with no new shader — wind/vertex-animation, which it lacks, is the only thing you give up.
+
+### Runtime texture-input names depend on how the shader DECLARES the input
+`Material.Set("X", tex)` binds by the **`CreateInputTexture2D` name**, not the `g_t*` HLSL name:
+- A custom shader with `CreateInputTexture2D( Color, … )` → `Set("Color", tex)` (e.g. `goldsrc.shader`).
+- A standard shader pulling `common/utils/Material.CommonInputs.hlsl` (`complex`/`foliage`) declares `TextureColor`/`TextureNormal`/`TextureRoughness` → `Set("TextureColor", tex)`. Binding the wrong name leaves the input at its `Default` (often white) — **not** pink. Pink = the whole shader/material is invalid (above), not a missing texture.
+
+## Hide a renderer WITHOUT recreating its SceneObject: `SceneObject.RenderingEnabled`, not `Enabled`
+
+Toggling a renderer's `GameObject.Enabled` (or the component `.Enabled`) **destroys and recreates the underlying `SceneObject`/`SceneModel`**. For a `SkinnedModelRenderer` that **re-inits the animgraph at its entry state** — so a viewmodel hidden then shown (e.g. a third-person camera toggle) **replays its deploy/draw animation every time**. It also resets per-`SceneObject` flags (`CastShadows` etc.), which is why those often get re-set every frame.
+- **Fix:** to hide without tearing down the animgraph, set `renderer.SceneObject.RenderingEnabled = false/true`. The animgraph keeps running (stays settled in idle), so re-showing is instant with no animation replay. Apply to every renderer involved (e.g. the gun **and** its bonemerged arms). `RenderingEnabled` exists on every `Scene*` object (SceneModel / SceneCustomObject / lights / …).
+- Rule of thumb: keep `GameObject.Enabled` tied to **presence** (does it exist at all) and drive **visibility** via `RenderingEnabled`.
+- Related: anchor a first-person effect to a model attachment with `SkinnedModelRenderer.GetAttachment("muzzle")` (returns a **world-space** `Transform?`), and if it must track the gun (muzzle flash) update its position every frame from that attachment — a one-shot world-static spawn lags behind when the player moves.
+
+## Per-frame shader params on a runtime material: use `SceneObject.Attributes`, NOT a per-frame `Material.Set`
+
+A `Material` from `Material.Create(...)` reads attributes you `Set` on it **once, before the object first renders** — those bake in (e.g. wind direction/strength set at material-build time work fine). But a **per-frame** `material.Set("X", v)` on that same runtime material is **NOT reliably re-uploaded** to the already-rendering `SceneObject` — the new value is silently dropped. Symptom from a real session: procedural grass on `goldsrc.shader` **swayed in the wind** (params baked once at creation) **but never bent away from the player** — the per-frame player positions were being pushed via `material.Set("GrassActor0", …)` and never reached the shader.
+- **Fix:** write per-frame values onto **each renderer's `renderer.SceneObject.Attributes.Set("X", v)`** — the engine's live per-object attribute channel. The shader reads `Attribute("X")` from the **merged** set (SceneObject attributes win over the material default), so dynamic data shows immediately. Same pattern any per-frame shader push should use (e.g. a toon shader updating light/rim params each frame).
+- **Rule of thumb:** static look → `Material.Set` at build time; anything that changes per frame → `SceneObject.Attributes`. (For a `Graphics.Draw`/`SceneCustomObject` path the equivalent is a `RenderAttributes` passed to the draw call.)
+
+## A mid-session shader recompile's NEW StaticCombo doesn't load — `mat_reloadshaders` loads it WITHOUT a restart
+
+When you add a `Feature`/`StaticCombo` to an **existing** project shader (one that ships in the build, so it's not the "new shader renders pink" case) and recompile it during a running editor, the engine keeps its **old shader variant table** — the new combo isn't in it. A runtime material's `SetFeature("F_NEW", 1)` then falls back to the old static variant, so the feature silently does nothing (e.g. a grass shader renders but never animates). You do **not** need a full editor restart:
+- Run **`mat_reloadshaders shaders/yourshader.shader`** in the editor console (`run_console_command`) — it reloads the shader from the fresh `.shader_c` on disk and registers the new combos.
+- Verify with **`mat_print_shader_info shaders/yourshader.shader`**: the Vertex/Pixel "Static combos:" list should now include your new combo (e.g. `S_NEWFEATURE 0..1`). Output goes to the log — read it via `tail_log`.
+- Then **rebuild any runtime materials** that use it (the stale-handle "pink after a shader recompile" rule still applies to already-built materials — recreate them, e.g. via your loader's ResetCache + Reload).
+
+## Pasted / downloaded "wav" (or other source) assets can be gzip-compressed — compile fails cryptically
+A source asset that won't compile (`asset_get_compile_status` → `is_failed:true`, no `*_c`) may not be the format its extension claims. Check the magic bytes: `head -c4 file.wav | xxd` — `RIFF` = real WAV, **`1f 8b`** = gzip. Fix: `zcat in.wav > out.wav` (verify it now starts `RIFF`), then `register_asset_file` again. The **`register_asset_file` → `asset_get_compile_status`** loop is the way to add raw assets (wav/png/tga) over the bridge and confirm each produced a compiled `*_c` before referencing it from a `.sound`/material.

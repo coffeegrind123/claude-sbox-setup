@@ -6,11 +6,13 @@ The in-editor MCP server (the claude-sbox s&box tool addon, `ghage/claude-sbox` 
 
 This is the narrative overview of every capability bucket (the per-subsystem tables below have the exact tool surfaces). SKILL.md links here for the full map.
 
-When you're in an s&box context, you have access to **three ground-truth pipelines** (live, no snapshots):
+When you're in an s&box context, you have access to **four ground-truth pipelines** (live, no snapshots — three docs + one real-world source):
 
 1. **Live API schema**: locally built from the editor's loaded assemblies via `Facepunch.AssemblySchema`. Strictly more accurate than any CDN snapshot because it reflects the exact engine + addon DLLs the user is running. Use the `schema_*` MCP tools to look up exact, doc-commented signatures for every public type/method/property/field/attribute.
 2. **Live prose docs**: two sibling pipelines, both cached + BM25-indexed by the MCP server. Use `docs_*` for **first-party Facepunch documentation** (Facepunch/sbox-docs repo, CC-BY-4.0, with `sbox.game/llms.txt` as fallback) — the authoritative usage docs for the engine and editor. Use `learn_*` for **community tutorials** (daily mirror of sbox.game/learn at `coffeegrind123/sbox-learn-docs`) — walkthroughs and how-tos written by other s&box developers, with rich faceted metadata (difficulty, topic, content_type, tags) you can filter on.
 3. **Hosted structured docs** (`sdocs_*`): third-party Meilisearch proxy at `sdocs.suiram.dev` exposing 9 tools for symbol resolution, per-method overload details, examples, and related guides. Distinct from `docs_*`: returns structured per-symbol metadata + ranked hits + per-method per-parameter type/doc breakdowns. **Queries leave the machine**: for symbol names lifted from private project source, prefer `schema_*` + `docs_*`. See § Hosted structured docs and gotchas.
+
+And a fourth, **real-world source** pipeline — **`codesearch_*`**: live-scrapes [sbox.game/codesearch](https://sbox.game/codesearch) (the source of *every open-source package*) through a headless-Chromium driver, because that page is a Blazor Server SPA with no JSON API and no prerendered HTML. Where `schema_*`/`sdocs_*` tell you a method's *signature*, codesearch tells you how people *actually call it* in shipped code: `codesearch_search(query)` returns ranked hits (package, file, snippet, source URL), then `codesearch_get_file(...)` pulls the whole file and `codesearch_list_files(...)` walks a package's tree. **Queries leave the machine** (same privacy posture as `sdocs_*`). First use needs a one-time `codesearch_install_driver` (returns `codesearch_driver_unavailable` until then). See § Code search.
 
 **Recommended docs-query layering** (default; deviate when the user already pinned a layer):
 
@@ -19,7 +21,7 @@ When you're in an s&box context, you have access to **three ground-truth pipelin
 3. **Get the narrative** with `docs_search(query)` → `docs_get(path)` for first-party prose (lifecycle, RPC semantics, networking visibility rules, etc.). Use `sdocs_get_related_guides(id)` instead when you already have an FQN — it cross-links the symbol back to the prose page.
 4. **Fall back to community** with `learn_search(query)` or `learn_search(topic: "...", difficulty: "Beginner")` when official docs don't cover the question. Faceted; use empty query + filter for "highest-rated in this topic".
 
-Shortcut: for a one-line concept ("RPC visibility rules") skip 1 and start at 3. For verifying a method call you're about to write, run 1 alone — schema is ground truth.
+Shortcut: for a one-line concept ("RPC visibility rules") skip 1 and start at 3. For verifying a method call you're about to write, run 1 alone — schema is ground truth. To see **real call sites** ("how does anyone actually use `ApplyForce` / `Scene.Trace`?"), add `codesearch_search(symbol)` → `codesearch_get_file(hit.source_url)` — the only layer that shows live shipped usage rather than signatures or prose.
 
 You also have **live editor introspection + drive** when the editor is running and the bridge is connected:
 
@@ -197,6 +199,25 @@ Each surface answers a different question. When researching anything bigger than
 - *"Beginner UI tutorial"* → step 4 alone with facets.
 
 **Provenance note**: results from step 1 reflect the running editor's loaded assemblies (fingerprint via `schema_freshness`); results from step 2 hit `sdocs.suiram.dev` (hosted, snapshot whatever it was last indexed against); results from steps 3 + 4 read locally-cached repo tarballs (`docs_refresh` / `learn_refresh` to revalidate). When the layers disagree on a signature, trust step 1.
+
+## Code search (`codesearch_*`)
+
+Full-text search over the **source of every open-source package on sbox.game** — the [Code Search](https://sbox.game/codesearch) feature ("search the source of every open source package"). This is the *real-world usage* layer: `schema_*`/`sdocs_*` give you signatures; codesearch shows you how shipped community + Facepunch code actually calls them, and lets you pull whole files for context.
+
+**Why it needs a driver (and isn't just an HTTP call like `sdocs_*`)**: sbox.game is a **Blazor Server** SPA. A raw GET of `/codesearch?q=…` returns only a ~3 KB bootstrap shell — results stream over a SignalR WebSocket circuit and are *never* in the HTML. So the addon drives a headless Chromium (via Microsoft.Playwright) that loads the page, lets the circuit render, and scrapes the result DOM. Because s&box's compiler can't reference Playwright as a NuGet package, the driver is a **prebuilt DLL loaded at runtime** (`Assembly.LoadFrom`) from the game's global store `<game>/.claude-sbox/codesearch-driver/runtime/`; its source + build scripts live in the `claude-sbox-setup` repo, never in the published addon. Everything still runs in one process (only the driver + Playwright DLLs enter the editor's load context; the node driver + Chromium are child processes).
+
+**First-use flow**: a codesearch call with no driver returns `codesearch_driver_unavailable`. Call **`codesearch_install_driver`** once (builds + deploys, ~1–3 min for restore + Chromium download), then retry — it loads lazily on the next call (no restart). **Queries leave the machine** (same privacy posture as `sdocs_*`): for identifiers from private project source, prefer `schema_*` + `docs_*`.
+
+| Tool | What it does |
+|---|---|
+| `codesearch_search(query, type?, year?, limit?)` | Search package source. Returns `{total_results, hits:[{package, file, kind, source_url, start_line, snippet}]}`. `query` is free-text or a symbol (`"Physics.Trace"` quoted for phrase). `type` filters package kind (`library`/`game`/`code`/`editor`/`unittest`); `year` filters publish year. `source_url` feeds straight into `codesearch_get_file`. |
+| `codesearch_get_file(source_url \| org+package+file)` | Fetch the COMPLETE source of one file. Pass a hit's `source_url`, or `org`+`package`+`file` explicitly (e.g. `facepunch` / `sandbox` / `Player/NoclipMoveMode.cs`). Returns full `content` + `line_count`. |
+| `codesearch_list_files(org, package)` | Enumerate a package's whole source tree (flat list of file paths) to explore layout before drilling in. |
+| `codesearch_status` | Driver diagnostics: `driver_dll_found` / `driver_loaded` / `driver_status` (browser launched? chromium installed?) + `load_error`. Read-only; run first when codesearch fails. |
+| `codesearch_restart` | Tear down + relaunch the headless browser (next call relaunches lazily). Use if the circuit wedges or queries start timing out. |
+| `codesearch_install_driver(force?, timeout_seconds?)` | Build + deploy the driver (spawns `claude-sbox-setup/Build-CodeSearch-Driver.{bat,sh}`). Idempotent; `force:true` rebuilds (needs an editor restart if the driver's already loaded). Needs the .NET SDK on PATH. |
+
+**When to reach for `codesearch_*`**: "show me how people actually wire up an InputAction / VideoPlayer / Rigidbody force", "find every package that uses `IGameEventHandler`", "what does a real `Component.ITriggerListener` implementation look like". For a method's *contract* use `schema_*`/`sdocs_*`; for *real usage at scale* use codesearch, then `codesearch_get_file` to read the surrounding code.
 
 ## Project / addon (`get_active_project`, `list_*`)
 

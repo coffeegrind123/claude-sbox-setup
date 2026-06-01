@@ -19,3 +19,7 @@ Thumbs.db
 # Local environment overrides
 *.local
 *.local.*
+
+# codesearch driver build artifacts (source-only in git; output goes to <game>/.claude-sbox/)
+codesearch-driver/bin/
+codesearch-driver/obj/

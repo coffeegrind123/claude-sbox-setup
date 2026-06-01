@@ -16,12 +16,13 @@ For full schemas + signatures of any tool, call `ToolSearch query="select:mcp__s
 - `schema_freshness`: what assemblies the local schema reflects.
 - `sdocs_status`: sdocs proxy URL + config source.
 
-## Ground-truth lookup pipelines (5)
+## Ground-truth lookup pipelines (6)
 
 - `schema_*` (7): local API schema from the editor's loaded assemblies. **Most accurate**; reflects exactly the engine + addons running. See `mcp-tools.md` § API schema.
 - `docs_*` (4): local BM25 index over the Facepunch/sbox-docs repo. Prose narrative usage docs. See `mcp-tools.md` § Prose docs.
 - `learn_*` (4): local BM25 index over a daily mirror of sbox.game/learn community tutorials at `coffeegrind123/sbox-learn-docs`. Faceted (difficulty / topic / content_type / author / tags). See `mcp-tools.md` § Community tutorials.
 - `sdocs_*` (9): **hosted** structured docs proxy (Meilisearch backend at sdocs.suiram.dev). Symbol resolution + per-method overload docs + examples + related guides. **Queries leave the machine.** See `mcp-tools.md` § Hosted structured docs.
+- `codesearch_*` (5 + installer): **real-world source** search across every open-source package on sbox.game — `codesearch_search` / `_get_file` / `_list_files` / `_status` / `_restart`. Live-scrapes sbox.game/codesearch through a headless-Chromium driver (the page is a Blazor Server SPA — no JSON API). Shows how people *actually call* an API, then pulls the whole file. **Queries leave the machine.** See `mcp-tools.md` § Code search.
 - `reflection_*` (17): live `EditorTypeLibrary` walks: relationships, attribute discovery, type hierarchy, member metadata. Goes beyond signatures into discoverability.
 
 ## Reflection / cross-reference
@@ -177,6 +178,7 @@ Read engine source / addon source / editor caches without a bind mount. **All re
 
 - `bootstrap_engine`: runs `Bootstrap.bat`. Stages `engine` (DLLs: fails if editor open), `shaders`, `content`. Windows-only. 30-min default timeout.
 - `bootstrap_tests`: run engine test suite.
+- `codesearch_install_driver`: build + deploy the codesearch Playwright driver. Spawns `claude-sbox-setup/Build-CodeSearch-Driver.{bat,sh}` (`dotnet publish` → the game's global store `<game>/.claude-sbox/codesearch-driver/runtime/`, then `playwright install chromium`). Idempotent (`force:true` to rebuild). Call when `codesearch_*` return `codesearch_driver_unavailable`. Needs the .NET SDK on PATH.
 
 ## Event bus
 

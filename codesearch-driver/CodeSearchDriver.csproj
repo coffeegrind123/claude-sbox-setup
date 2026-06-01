@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+		The codesearch driver. Source lives in the claude-sbox-setup repo (NOT in the published
+		claude-sbox addon). Built by normal `dotnet publish` via ../Build-CodeSearch-Driver.{bat,sh}
+		(or the codesearch_install_driver MCP tool); output (this DLL + Microsoft.Playwright.dll + the
+		.playwright node driver) is deployed to the game's global store
+		<game>/.claude-sbox/codesearch-driver/runtime/, where the s&box addon loads it at runtime via
+		Assembly.LoadFrom. Keeping source + binaries out of the addon keeps the published package
+		source-only. Targets the same TFM as the editor runtime so the DLL loads cleanly.
+	-->
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<AssemblyName>ClaudeSbox.CodeSearch.Driver</AssemblyName>
+		<RootNamespace>ClaudeSbox.CodeSearch.Driver</RootNamespace>
+		<LangVersion>14</LangVersion>
+		<Nullable>disable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<GenerateDocumentationFile>false</GenerateDocumentationFile>
+		<!-- A class library: there's no Main of our own; Microsoft.Playwright.Program.Main is the install CLI. -->
+		<OutputType>Library</OutputType>
+		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Playwright" Version="1.49.0" />
+	</ItemGroup>
+
+</Project>
