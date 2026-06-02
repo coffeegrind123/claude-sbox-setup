@@ -111,6 +111,18 @@ they don't know to expect them.
   already-loaded driver needs an **editor restart** to take effect
   (`Assembly.LoadFrom` caches the assembly for the process lifetime).
   Run `codesearch_status` to see `driver_loaded` / `load_error`.
+- `forum_*` and `release_notes` share that SAME driver (sbox.game's
+  forum + changelog are the same Blazor Server app), so they need no
+  separate install — `forum_driver_unavailable` → run
+  `codesearch_install_driver`. If you instead get
+  `forum_driver_outdated` / `release_notes_driver_outdated`, the
+  deployed driver predates these ops (returns `bad_op`): run
+  `codesearch_install_driver force:true`, then **restart the editor**
+  (same `Assembly.LoadFrom` cache rule). Their queries leave the
+  machine too. Forum pagination quirk: a category page exposes only
+  the ~50 most-recent threads to anonymous readers (no paging) —
+  use `forum_search` to reach older/specific threads; threads
+  themselves DO paginate at 30 posts/page via the `page` arg.
 - `auto_*` tool names use underscores **only**. The conceptual
   identity returned by `auto_list` is `auto:Editor.EditorScene.Copy`,
   but the actual MCP tool name is `auto_Editor_EditorScene_Copy`

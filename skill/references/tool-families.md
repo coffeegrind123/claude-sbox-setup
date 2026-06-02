@@ -15,12 +15,14 @@ For full schemas + signatures of any tool, call `ToolSearch query="select:mcp__s
 - `dispatcher_recent_calls` / `dispatcher_metrics`: your own call history + per-tool aggregates. Use to debug "why didn't that work?".
 - `schema_freshness`: what assemblies the local schema reflects.
 
-## Ground-truth lookup pipelines (6)
+## Ground-truth lookup pipelines (8)
 
 - `schema_*` (7): local API schema from the editor's loaded assemblies. **Most accurate**; reflects exactly the engine + addons running. See `mcp-tools.md` § API schema.
 - `docs_*` (4): local BM25 index over the Facepunch/sbox-docs repo. Prose narrative usage docs. See `mcp-tools.md` § Prose docs.
 - `learn_*` (4): local BM25 index over a daily mirror of sbox.game/learn community tutorials at `coffeegrind123/sbox-learn-docs`. Faceted (difficulty / topic / content_type / author / tags). See `mcp-tools.md` § Community tutorials.
 - `codesearch_*` (5 + installer): **real-world source** search across every open-source package on sbox.game — `codesearch_search` / `_get_file` / `_list_files` / `_status` / `_restart`. Live-scrapes sbox.game/codesearch through a headless-Chromium driver (the page is a Blazor Server SPA — no JSON API). Shows how people *actually call* an API, then pulls the whole file. **Queries leave the machine.** See `mcp-tools.md` § Code search.
+- `forum_*` (4): browse + search the **community forum** at sbox.game/f — `forum_list_categories` (slugs) → `forum_browse_category` (≤50 recent threads) → `forum_read_thread` (posts: author/score/content/ratings, 30/page); `forum_search` (site index, top ~50 + true total). Live discussion: bug reports, dev chat, announcements, Q&A. **Rides the shared codesearch driver** (same Blazor scrape + install; `forum_driver_outdated` → `codesearch_install_driver force:true` + editor restart). **Queries leave the machine.** See `mcp-tools.md` § Community forum.
+- `release_notes` (1): read the **changelog** at sbox.game/release-notes — version groups newest-first, each `{version, date, sections:{added,improved,fixed,removed,known_issues}}`. `limit` = how many back; `version` = substring filter. "What changed / when did X land / is this a known issue". Shares the codesearch driver. See `mcp-tools.md` § Release notes.
 - `youtube_*` (3 + installer): **search + watch tutorial VIDEOS** — `youtube_search` (keyless yt-dlp/InnerTube discovery → ranked videos) / `youtube_watch` (download + transcribe locally with yapsnap + a frame per caption → a viewing package `watch.md` + `frames/` in `<game>/.claude-sbox/youtube/`, which you then Read since frames are images) / `youtube_status` (+ `youtube_install`). Flow: `youtube_search(topic)` → feed a result url to `youtube_watch`. For VIDEO; `learn_*` is for text tutorials. English audio; transcription is local. See `mcp-tools.md` § Watching tutorial videos + `watch-video.md`.
 - `reflection_*` (17): live `EditorTypeLibrary` walks: relationships, attribute discovery, type hierarchy, member metadata. Goes beyond signatures into discoverability.
 
