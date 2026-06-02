@@ -1,5 +1,6 @@
 @echo off
-REM Build + deploy the codesearch Playwright driver. Source lives HERE in claude-sbox-setup
+REM Build + deploy the forum site-scrape Playwright driver (formerly the codesearch driver --
+REM codesearch + release_notes are plain REST now; this driver only backs forum_*). Source lives HERE in claude-sbox-setup
 REM (codesearch-driver\); output is deployed to the game's GLOBAL store
 REM <game>\.claude-sbox\codesearch-driver\runtime\ -- NOT into the claude-sbox addon, so the
 REM published addon stays source-only. Driven by the codesearch_install_driver MCP tool, or

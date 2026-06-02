@@ -98,28 +98,30 @@ they don't know to expect them.
   `models/citizen/citizen.vmdl`), **not** a `model` parameter.
   Same goes for `model_list_bones`, `model_list_attachments`,
   `model_list_hitboxes`.
-- `codesearch_*` queries leave the machine, and the driver has a
-  lifecycle. The tools live-scrape sbox.game/codesearch (a Blazor
-  Server SPA) via a headless Chromium, so query strings hit the
-  network — don't pass verbatim private-source identifiers; prefer
-  the local `schema_*` (signatures) / `docs_*` (prose) families for
-  those. The driver is a prebuilt DLL loaded
-  from `<game>/.claude-sbox/codesearch-driver/runtime/`; if a call
-  returns `codesearch_driver_unavailable`, run `codesearch_install_driver`
-  once (needs the .NET SDK) and retry — it loads lazily, no restart.
-  But a `codesearch_install_driver force:true` REBUILD over an
-  already-loaded driver needs an **editor restart** to take effect
-  (`Assembly.LoadFrom` caches the assembly for the process lifetime).
-  Run `codesearch_status` to see `driver_loaded` / `load_error`.
-- `forum_*` and `release_notes` share that SAME driver (sbox.game's
-  forum + changelog are the same Blazor Server app), so they need no
-  separate install — `forum_driver_unavailable` → run
-  `codesearch_install_driver`. If you instead get
-  `forum_driver_outdated` / `release_notes_driver_outdated`, the
-  deployed driver predates these ops (returns `bad_op`): run
-  `codesearch_install_driver force:true`, then **restart the editor**
-  (same `Assembly.LoadFrom` cache rule). Their queries leave the
-  machine too. Forum pagination quirk: a category page exposes only
+- `codesearch_*` and `release_notes` are plain REST (no driver), but
+  their queries still **leave the machine** — they hit the public
+  Facepunch backend (`public.facepunch.com/sbox/code/search/1/` and
+  `/news/platform`), so don't pass verbatim private-source identifiers;
+  prefer the local `schema_*` (signatures) / `docs_*` (prose) families
+  for those. codesearch has a backend quirk: results are a **capped
+  top-N (~30) with no paging** (`skip`/`take` are ignored) — the tools
+  surface `truncated` + `total_results`/`total_in_package` so you know
+  when a list was cut off; narrow with `ident`/`type`/`year` or a more
+  specific query rather than expecting to page. `codesearch_status`
+  just reports `transport:"rest"`; `codesearch_restart` is a no-op.
+- `forum_*` is the **only** family that still uses the headless-Chromium
+  driver — the forum is a Blazor Server app (threads stream over
+  SignalR, absent from raw HTML), so there's no REST endpoint to hit.
+  The driver is a prebuilt DLL loaded from
+  `<game>/.claude-sbox/codesearch-driver/runtime/`; if a forum call
+  returns `forum_driver_unavailable`, run `codesearch_install_driver`
+  once (needs the .NET SDK; the install tool keeps its `codesearch_`
+  name for back-compat) and retry — it loads lazily, no restart. A
+  `force:true` REBUILD over an already-loaded driver, or a
+  `forum_driver_outdated` (`bad_op`) error, needs an **editor restart**
+  to take effect (`Assembly.LoadFrom` caches the assembly for the
+  process lifetime). Forum queries leave the machine too. Forum
+  pagination quirk: a category page exposes only
   the ~50 most-recent threads to anonymous readers (no paging) —
   use `forum_search` to reach older/specific threads; threads
   themselves DO paginate at 30 posts/page via the `page` arg.
