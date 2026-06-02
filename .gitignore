@@ -23,3 +23,8 @@ Thumbs.db
 # codesearch driver build artifacts (source-only in git; output goes to <game>/.claude-sbox/)
 codesearch-driver/bin/
 codesearch-driver/obj/
+
+# yapwatch viewing-package output + its self-managed venv (lives in ~/.claude-sbox/)
+yapwatch/yapwatch-out/
+yapwatch-out/
+yapwatch/venv/

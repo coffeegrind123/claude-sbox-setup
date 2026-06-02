@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# youtube launcher — runs youtube_watch.py inside a self-managed venv that holds
+# yapsnap + yt-dlp, so the host Python stays clean. First run bootstraps the venv
+# (lazy install, mirroring the codesearch driver). ffmpeg is taken from the system.
+#
+#   ./youtube <url|file> [options]      see: ./youtube --help
+#
+# Override the venv location with YOUTUBE_VENV. Force a (re)install with
+# YOUTUBE_REINSTALL=1.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+venv="${YOUTUBE_VENV:-$HOME/.claude-sbox/youtube/venv}"
+py="$venv/bin/python"
+
+need_install=0
+[ -x "$py" ] || need_install=1
+[ "${YOUTUBE_REINSTALL:-0}" = "1" ] && need_install=1
+if [ "$need_install" = 0 ]; then
+  "$py" -c "import yapsnap, yt_dlp" >/dev/null 2>&1 || need_install=1
+fi
+# Self-heal yapsnap's misplaced checksum manifest on every healthy launch (no-op if
+# already in place) so a venv built before this repair landed still works.
+if [ "$need_install" = 0 ]; then
+  "$py" "$here/repair_yapsnap.py" >/dev/null 2>&1 || true
+fi
+
+if [ "$need_install" = 1 ]; then
+  echo "[youtube] bootstrapping venv at $venv (one-time) …" >&2
+  PY="${PYTHON:-python3}"
+  command -v "$PY" >/dev/null 2>&1 || { echo "error: python3 not found" >&2; exit 3; }
+  command -v ffmpeg >/dev/null 2>&1 || echo "[youtube] warning: ffmpeg not on PATH — install it (apt/brew/winget)" >&2
+  "$PY" -m venv "$venv"
+  "$py" -m pip install --upgrade pip >/dev/null
+  "$py" -m pip install yapsnap yt-dlp imageio-ffmpeg >&2
+  # Fix yapsnap 0.1.2.x's misplaced model checksum manifest (see repair_yapsnap.py).
+  "$py" "$here/repair_yapsnap.py" || true
+fi
+
+# Prefer the venv's console scripts (yapsnap / yt-dlp) on PATH for this run.
+export PATH="$venv/bin:$PATH"
+exec "$py" "$here/youtube_watch.py" "$@"

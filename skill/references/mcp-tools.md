@@ -153,6 +153,23 @@ Each tutorial carries YAML frontmatter: `title`, `slug`, `url`, `author`, `autho
 
 **License**: scraped content is treated as CC-BY-4.0. Each tutorial's `url` field is the canonical attribution target (the original sbox.game/learn page by the named author).
 
+## Watching tutorial videos (`youtube_*`)
+
+`learn_*` covers text tutorials; a lot of the best s&box knowledge is **video** you have a URL for but can't play. `youtube_search` **discovers** videos by topic (keyless — yt-dlp's InnerTube search, no API key/quota); `youtube_watch` then makes one **watchable**: it downloads it (yt-dlp), transcribes it locally ([yapsnap](https://github.com/kouhxp/yapsnap), CPU-only streaming Zipformer2 ONNX — English), and grabs one ffmpeg frame per caption, writing a **viewing package** to the game's global store `<game>/.claude-sbox/youtube/youtube-out/<id>/`: `watch.md` (narration interleaved with the on-screen frame at each timestamp, in order), `watch.json`, `frames/*.jpg`, `transcript.txt`. Typical flow: `youtube_search(topic)` → feed a result's url to `youtube_watch`.
+
+**Why a runtime + out-of-process, like codesearch**: yapsnap is Python-only with no API, so the work runs as a child Python process from a venv at `<game>/.claude-sbox/youtube/venv/`. The Python source (`youtube_watch.py` + `youtube_search.py`) + build scripts live in `claude-sbox-setup`, never in the published addon (source-only). ffmpeg is bundled via `imageio-ffmpeg`, so the only host requirement is **Python 3 on PATH**. Frames land in the game folder and you read them with your **own file tools** (they're images — JSON-over-MCP can't carry them); the result hands you `output_dir_game_relative` for exactly that.
+
+**First-use flow**: `youtube_watch` with no venv returns `youtube_venv_unavailable`. Call **`youtube_install`** once (creates the venv + pip-installs yapsnap/yt-dlp/imageio-ffmpeg, ~1–2 min; the MCP call may time out while pip works — re-poll `youtube_status` until `venv_ready` + `deps.import_ok`). No editor restart (nothing is loaded into the editor; a child python does the work). First `youtube_watch` also downloads the speech model (~once).
+
+| Tool | What it does |
+|---|---|
+| `youtube_search(query, limit?, sort?, timeout_seconds?)` | Keyless video search (yt-dlp `ytsearchN:`). Returns `{count, results:[{id, title, url, channel, duration, view_count}]}`. `limit` default 10 (max 50); `sort` = `relevance` (default) / `date` / `views`. Videos only. Feed a result's `url` to `youtube_watch`. |
+| `youtube_watch(input, max_frames?, every?, height?, frame_offset?, dedupe?, dedupe_threshold?, keep_video?, model?, yapsnap_args?, include_segments?, timeout_seconds?)` | `input` = video URL or absolute local path. Returns `{title, duration, caption_count, frame_count, output_dir(+_game_relative), watch_md(+_game_relative), frames_dir, transcript, segments:[{t, t_seconds, text, frame}], read_hint}`. Then **Read `watch.md` + `frames/*.jpg` from the game folder**. Defaults: `max_frames` 60, `height` 480, `dedupe` on (drops frames near-identical to the previous kept one), `frame_offset` 0.5s. `segments` auto-omitted above ~400 captions (read `watch.json`). |
+| `youtube_status` | Read-only: `venv_ready`, `deps.import_ok`, resolved venv/script/build-script/cache paths, `cached_packages`. Run first when `youtube_watch` fails. |
+| `youtube_install(force?, timeout_seconds?)` | Provision the venv (spawns `claude-sbox-setup/Build-YouTube-Venv.{bat,sh}`). Idempotent; `force:true` recreates. Needs Python 3 on PATH. |
+
+**Privacy**: transcription is fully local (no cloud); only the normal video download leaves the machine. **English audio only.** See `watch-video.md`.
+
 ## Hosted structured docs (`sdocs_*`)
 
 A separate **third-party hosted MCP proxy** at `https://sdocs.suiram.dev/api/v1/mcp` (Meilisearch-backed). Distinct from `docs_*` (local prose) and `schema_*` (local signatures): this surface returns structured per-symbol metadata with TOON output, ranked snippets, per-method overload details, and example/related-guide retrieval. URLs in results are sbox.game `/docs/api/...` paths.
