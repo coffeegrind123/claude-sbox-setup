@@ -98,22 +98,12 @@ they don't know to expect them.
   `models/citizen/citizen.vmdl`), **not** a `model` parameter.
   Same goes for `model_list_bones`, `model_list_attachments`,
   `model_list_hitboxes`.
-- `sdocs_*` queries leave the local machine. The `sdocs_*` family
-  proxies to a hosted Meilisearch-backed service at
-  `https://sdocs.suiram.dev/api/v1/mcp` — query strings and the
-  symbol names you pass in are sent over the network. For symbol
-  names extracted from private project source, prefer the local
-  `schema_*` family (signatures) or `docs_*` (prose). Reach for
-  `sdocs_*` only when the query is a generic concept ("component
-  update loop", "razor reactivity") rather than a verbatim
-  identifier from your code. Override the base URL via an env var on
-  the editor process or through
-  `game/data/claude-sbox-config.json` (`claude-sbox.sdocs_base_url`).
-- `codesearch_*` queries also leave the machine, and the driver has a
+- `codesearch_*` queries leave the machine, and the driver has a
   lifecycle. The tools live-scrape sbox.game/codesearch (a Blazor
   Server SPA) via a headless Chromium, so query strings hit the
-  network — same privacy posture as `sdocs_*`: don't pass verbatim
-  private-source identifiers. The driver is a prebuilt DLL loaded
+  network — don't pass verbatim private-source identifiers; prefer
+  the local `schema_*` (signatures) / `docs_*` (prose) families for
+  those. The driver is a prebuilt DLL loaded
   from `<game>/.claude-sbox/codesearch-driver/runtime/`; if a call
   returns `codesearch_driver_unavailable`, run `codesearch_install_driver`
   once (needs the .NET SDK) and retry — it loads lazily, no restart.

@@ -6,22 +6,20 @@ The in-editor MCP server (the claude-sbox s&box tool addon, `ghage/claude-sbox` 
 
 This is the narrative overview of every capability bucket (the per-subsystem tables below have the exact tool surfaces). SKILL.md links here for the full map.
 
-When you're in an s&box context, you have access to **four ground-truth pipelines** (live, no snapshots — three docs + one real-world source):
+When you're in an s&box context, you have access to **three ground-truth pipelines** (live, no snapshots — two docs + one real-world source):
 
 1. **Live API schema**: locally built from the editor's loaded assemblies via `Facepunch.AssemblySchema`. Strictly more accurate than any CDN snapshot because it reflects the exact engine + addon DLLs the user is running. Use the `schema_*` MCP tools to look up exact, doc-commented signatures for every public type/method/property/field/attribute.
 2. **Live prose docs**: two sibling pipelines, both cached + BM25-indexed by the MCP server. Use `docs_*` for **first-party Facepunch documentation** (Facepunch/sbox-docs repo, CC-BY-4.0, with `sbox.game/llms.txt` as fallback) — the authoritative usage docs for the engine and editor. Use `learn_*` for **community tutorials** (daily mirror of sbox.game/learn at `coffeegrind123/sbox-learn-docs`) — walkthroughs and how-tos written by other s&box developers, with rich faceted metadata (difficulty, topic, content_type, tags) you can filter on.
-3. **Hosted structured docs** (`sdocs_*`): third-party Meilisearch proxy at `sdocs.suiram.dev` exposing 9 tools for symbol resolution, per-method overload details, examples, and related guides. Distinct from `docs_*`: returns structured per-symbol metadata + ranked hits + per-method per-parameter type/doc breakdowns. **Queries leave the machine**: for symbol names lifted from private project source, prefer `schema_*` + `docs_*`. See § Hosted structured docs and gotchas.
 
-And a fourth, **real-world source** pipeline — **`codesearch_*`**: live-scrapes [sbox.game/codesearch](https://sbox.game/codesearch) (the source of *every open-source package*) through a headless-Chromium driver, because that page is a Blazor Server SPA with no JSON API and no prerendered HTML. Where `schema_*`/`sdocs_*` tell you a method's *signature*, codesearch tells you how people *actually call it* in shipped code: `codesearch_search(query)` returns ranked hits (package, file, snippet, source URL), then `codesearch_get_file(...)` pulls the whole file and `codesearch_list_files(...)` walks a package's tree. **Queries leave the machine** (same privacy posture as `sdocs_*`). First use needs a one-time `codesearch_install_driver` (returns `codesearch_driver_unavailable` until then). See § Code search.
+And a third, **real-world source** pipeline — **`codesearch_*`**: live-scrapes [sbox.game/codesearch](https://sbox.game/codesearch) (the source of *every open-source package*) through a headless-Chromium driver, because that page is a Blazor Server SPA with no JSON API and no prerendered HTML. Where `schema_*` tells you a method's *signature*, codesearch tells you how people *actually call it* in shipped code: `codesearch_search(query)` returns ranked hits (package, file, snippet, source URL), then `codesearch_get_file(...)` pulls the whole file and `codesearch_list_files(...)` walks a package's tree. **Queries leave the machine.** First use needs a one-time `codesearch_install_driver` (returns `codesearch_driver_unavailable` until then). See § Code search.
 
 **Recommended docs-query layering** (default; deviate when the user already pinned a layer):
 
-1. **Ground first** with `schema_search_members(query)` or `schema_lookup_type(fqn)` — confirms the symbol actually exists in *this* build and pins the canonical FQN. If `connected=false`, skip to step 3 (local prose still works).
-2. **Get usage shape** with `sdocs_search_docs(query)` → `sdocs_get_method_details(id)` for per-parameter docs/return types, plus `sdocs_get_examples(id, includeRelated:true)` when the agent needs to see how the call is wired. Skip if the symbol came from private project source (privacy: queries leave the machine).
-3. **Get the narrative** with `docs_search(query)` → `docs_get(path)` for first-party prose (lifecycle, RPC semantics, networking visibility rules, etc.). Use `sdocs_get_related_guides(id)` instead when you already have an FQN — it cross-links the symbol back to the prose page.
-4. **Fall back to community** with `learn_search(query)` or `learn_search(topic: "...", difficulty: "Beginner")` when official docs don't cover the question. Faceted; use empty query + filter for "highest-rated in this topic".
+1. **Ground first** with `schema_search_members(query)` or `schema_lookup_type(fqn)` — confirms the symbol actually exists in *this* build and pins the canonical FQN, including per-parameter types and return types. If `connected=false`, skip to step 2 (local prose still works).
+2. **Get the narrative** with `docs_search(query)` → `docs_get(path)` for first-party prose (lifecycle, RPC semantics, networking visibility rules, etc.).
+3. **Fall back to community** with `learn_search(query)` or `learn_search(topic: "...", difficulty: "Beginner")` when official docs don't cover the question. Faceted; use empty query + filter for "highest-rated in this topic".
 
-Shortcut: for a one-line concept ("RPC visibility rules") skip 1 and start at 3. For verifying a method call you're about to write, run 1 alone — schema is ground truth. To see **real call sites** ("how does anyone actually use `ApplyForce` / `Scene.Trace`?"), add `codesearch_search(symbol)` → `codesearch_get_file(hit.source_url)` — the only layer that shows live shipped usage rather than signatures or prose.
+Shortcut: for a one-line concept ("RPC visibility rules") skip 1 and start at 2. For verifying a method call you're about to write, run 1 alone — schema is ground truth. To see **real call sites** ("how does anyone actually use `ApplyForce` / `Scene.Trace`?"), add `codesearch_search(symbol)` → `codesearch_get_file(hit.source_url)` — the only layer that shows live shipped usage rather than signatures or prose.
 
 You also have **live editor introspection + drive** when the editor is running and the bridge is connected:
 
@@ -170,60 +168,34 @@ Each tutorial carries YAML frontmatter: `title`, `slug`, `url`, `author`, `autho
 
 **Privacy**: transcription is fully local (no cloud); only the normal video download leaves the machine. **English audio only.** See `watch-video.md`.
 
-## Hosted structured docs (`sdocs_*`)
-
-A separate **third-party hosted MCP proxy** at `https://sdocs.suiram.dev/api/v1/mcp` (Meilisearch-backed). Distinct from `docs_*` (local prose) and `schema_*` (local signatures): this surface returns structured per-symbol metadata with TOON output, ranked snippets, per-method overload details, and example/related-guide retrieval. URLs in results are sbox.game `/docs/api/...` paths.
-
-**Privacy posture**: queries leave the user's machine. For symbol names lifted out of private project source, prefer local `schema_*` + `docs_*`. `sdocs_*` is best for general concepts ("component update loop", "razor reactivity", "InputAction binding") rather than verbatim project identifiers.
-
-Override the base URL via env var on the editor process (highest priority), `game/data/claude-sbox-config.json` → `claude-sbox.sdocs_base_url`, or the default fallback.
-
-| Tool | What it does |
-|---|---|
-| `sdocs_status` | Report current base URL + config source. Read-only: does NOT call out. Use first to confirm whether the proxy is configured. |
-| `sdocs_search_docs(query, kind?, typeName?, limit?)` | BM25-style hit ranking over the API + Guides corpus. Returns `[{score, id, kind, name, sig, summary, owner, url}]` per hit. `kind` filters by `class`/`method`/`property`/`field`/`enum`. `typeName` narrows to one type's surface. |
-| `sdocs_resolve_symbol(name)` | Disambiguate a short name (`Component`, `Scene`, `Transform`) to fully-qualified candidates. Returns ranked FQNs. |
-| `sdocs_get_symbol(id)` | One symbol's namespace, kind, signature, summary, inheritance/declaration context. |
-| `sdocs_get_method_details(id)` | Single overload: canonical signature, per-parameter names + types + docs, return type + docs, related notes. |
-| `sdocs_get_type_members(typeName)` | Constructors / methods / properties of a type. Use after `_resolve_symbol` to enumerate the surface. |
-| `sdocs_get_examples(symbolId, includeRelated?)` | Code examples attached to a symbol. `includeRelated:true` falls back to type-level examples when the member has none. |
-| `sdocs_get_related_guides(symbolId)` | Guide pages most relevant to a symbol: workflows + editor steps that the API page alone doesn't cover. |
-| `sdocs_list_namespaces(prefix?)` | Top-down namespace explorer; per-namespace child + counts (class/enum/interface/struct + member count). |
-
-**When to reach for `sdocs_*` vs. `schema_*` vs. `docs_*`:**
-
-- `schema_*` for the precise signature of a member you can already name. Local; deterministic; cheap.
-- `docs_*` for the "I want a paragraph about X" narrative. Local; BM25 over Markdown.
-- `sdocs_*` for "I have a concept and want both ranked symbol hits AND example/guide leads in one call". Hosted; richer per-method metadata than `schema_*`; richer ranking than local BM25.
-
 ### Layered query recipe
 
 Each surface answers a different question. When researching anything bigger than a single signature lookup, layer them in this order rather than picking one:
 
 | Step | Goal | Tool(s) | When to skip |
 |---|---|---|---|
-| 1. Ground | Confirm the symbol exists in *this* build; pin the canonical FQN | `schema_search_members(query)` or `schema_lookup_type(fqn)`; `reflection_get_type_hierarchy(fqn)` if you need bases/subclasses | Editor not connected → start at step 3 (local prose). |
-| 2. Shape | Per-parameter docs, return type, overload details, example wiring | `sdocs_search_docs(query)` → `sdocs_get_method_details(id)` → `sdocs_get_examples(id, includeRelated:true)` | Symbol came from private project source (privacy: queries leave the machine) → use `schema_signature` + grep the prose docs. |
-| 3. Narrative | Workflow / semantics / "why does this behave this way" | `docs_search(query)` → `docs_get(path)`; or `sdocs_get_related_guides(id)` once you have the FQN | Question is just "what does this method return" — step 2 already answered it. |
-| 4. Community | Worked end-to-end examples or video walkthroughs | `learn_search(query)` or facet-driven `learn_search(topic: "...", difficulty: "Beginner")` | First-party prose at step 3 covers it. |
+| 1. Ground | Confirm the symbol exists in *this* build; pin the canonical FQN, per-parameter types, return type | `schema_search_members(query)` or `schema_lookup_type(fqn)`; `schema_signature(fqn)` for the full overload; `reflection_get_type_hierarchy(fqn)` if you need bases/subclasses | Editor not connected → start at step 2 (local prose). |
+| 2. Narrative | Workflow / semantics / "why does this behave this way" | `docs_search(query)` → `docs_get(path)` | Question is just "what does this method return" — step 1 already answered it. |
+| 3. Community | Worked end-to-end examples or video walkthroughs | `learn_search(query)` or facet-driven `learn_search(topic: "...", difficulty: "Beginner")` | First-party prose at step 2 covers it. |
+| 4. Real usage | How shipped code actually calls a member | `codesearch_search(symbol)` → `codesearch_get_file(hit.source_url)` | You only need the contract, not call sites — steps 1–2 cover it. |
 
 **Common single-step shortcuts** (don't run the whole pipeline when the question is narrow):
 
 - *"What's the signature of `Component.OnUpdate`?"* → step 1 alone.
-- *"Explain RPC ownership"* → step 3 alone (`docs_search("RPC ownership")`).
+- *"Explain RPC ownership"* → step 2 alone (`docs_search("RPC ownership")`).
 - *"What types implement `IScenePhysicsEvents`?"* → step 1 with `reflection_get_type_hierarchy`.
-- *"Show me a Razor reactivity example"* → step 2 (`sdocs_search_docs("razor reactivity")` → `_get_examples`).
-- *"Beginner UI tutorial"* → step 4 alone with facets.
+- *"How does anyone actually call `ApplyForce`?"* → step 4 (`codesearch_search("ApplyForce")` → `_get_file`).
+- *"Beginner UI tutorial"* → step 3 alone with facets.
 
-**Provenance note**: results from step 1 reflect the running editor's loaded assemblies (fingerprint via `schema_freshness`); results from step 2 hit `sdocs.suiram.dev` (hosted, snapshot whatever it was last indexed against); results from steps 3 + 4 read locally-cached repo tarballs (`docs_refresh` / `learn_refresh` to revalidate). When the layers disagree on a signature, trust step 1.
+**Provenance note**: results from step 1 reflect the running editor's loaded assemblies (fingerprint via `schema_freshness`); results from steps 2 + 3 read locally-cached repo tarballs (`docs_refresh` / `learn_refresh` to revalidate). When the layers disagree on a signature, trust step 1.
 
 ## Code search (`codesearch_*`)
 
-Full-text search over the **source of every open-source package on sbox.game** — the [Code Search](https://sbox.game/codesearch) feature ("search the source of every open source package"). This is the *real-world usage* layer: `schema_*`/`sdocs_*` give you signatures; codesearch shows you how shipped community + Facepunch code actually calls them, and lets you pull whole files for context.
+Full-text search over the **source of every open-source package on sbox.game** — the [Code Search](https://sbox.game/codesearch) feature ("search the source of every open source package"). This is the *real-world usage* layer: `schema_*` gives you signatures; codesearch shows you how shipped community + Facepunch code actually calls them, and lets you pull whole files for context.
 
-**Why it needs a driver (and isn't just an HTTP call like `sdocs_*`)**: sbox.game is a **Blazor Server** SPA. A raw GET of `/codesearch?q=…` returns only a ~3 KB bootstrap shell — results stream over a SignalR WebSocket circuit and are *never* in the HTML. So the addon drives a headless Chromium (via Microsoft.Playwright) that loads the page, lets the circuit render, and scrapes the result DOM. Because s&box's compiler can't reference Playwright as a NuGet package, the driver is a **prebuilt DLL loaded at runtime** (`Assembly.LoadFrom`) from the game's global store `<game>/.claude-sbox/codesearch-driver/runtime/`; its source + build scripts live in the `claude-sbox-setup` repo, never in the published addon. Everything still runs in one process (only the driver + Playwright DLLs enter the editor's load context; the node driver + Chromium are child processes).
+**Why it needs a driver (and isn't just a plain HTTP call)**: sbox.game is a **Blazor Server** SPA. A raw GET of `/codesearch?q=…` returns only a ~3 KB bootstrap shell — results stream over a SignalR WebSocket circuit and are *never* in the HTML. So the addon drives a headless Chromium (via Microsoft.Playwright) that loads the page, lets the circuit render, and scrapes the result DOM. Because s&box's compiler can't reference Playwright as a NuGet package, the driver is a **prebuilt DLL loaded at runtime** (`Assembly.LoadFrom`) from the game's global store `<game>/.claude-sbox/codesearch-driver/runtime/`; its source + build scripts live in the `claude-sbox-setup` repo, never in the published addon. Everything still runs in one process (only the driver + Playwright DLLs enter the editor's load context; the node driver + Chromium are child processes).
 
-**First-use flow**: a codesearch call with no driver returns `codesearch_driver_unavailable`. Call **`codesearch_install_driver`** once (builds + deploys, ~1–3 min for restore + Chromium download), then retry — it loads lazily on the next call (no restart). **Queries leave the machine** (same privacy posture as `sdocs_*`): for identifiers from private project source, prefer `schema_*` + `docs_*`.
+**First-use flow**: a codesearch call with no driver returns `codesearch_driver_unavailable`. Call **`codesearch_install_driver`** once (builds + deploys, ~1–3 min for restore + Chromium download), then retry — it loads lazily on the next call (no restart). **Queries leave the machine**: for identifiers from private project source, prefer `schema_*` + `docs_*`.
 
 | Tool | What it does |
 |---|---|
@@ -234,7 +206,7 @@ Full-text search over the **source of every open-source package on sbox.game** �
 | `codesearch_restart` | Tear down + relaunch the headless browser (next call relaunches lazily). Use if the circuit wedges or queries start timing out. |
 | `codesearch_install_driver(force?, timeout_seconds?)` | Build + deploy the driver (spawns `claude-sbox-setup/Build-CodeSearch-Driver.{bat,sh}`). Idempotent; `force:true` rebuilds (needs an editor restart if the driver's already loaded). Needs the .NET SDK on PATH. |
 
-**When to reach for `codesearch_*`**: "show me how people actually wire up an InputAction / VideoPlayer / Rigidbody force", "find every package that uses `IGameEventHandler`", "what does a real `Component.ITriggerListener` implementation look like". For a method's *contract* use `schema_*`/`sdocs_*`; for *real usage at scale* use codesearch, then `codesearch_get_file` to read the surrounding code.
+**When to reach for `codesearch_*`**: "show me how people actually wire up an InputAction / VideoPlayer / Rigidbody force", "find every package that uses `IGameEventHandler`", "what does a real `Component.ITriggerListener` implementation look like". For a method's *contract* use `schema_*`; for *real usage at scale* use codesearch, then `codesearch_get_file` to read the surrounding code.
 
 ## Project / addon (`get_active_project`, `list_*`)
 
