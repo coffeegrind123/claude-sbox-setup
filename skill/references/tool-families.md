@@ -26,6 +26,17 @@ For full schemas + signatures of any tool, call `ToolSearch query="select:mcp__s
 - `youtube_*` (3 + installer): **search + watch tutorial VIDEOS** — `youtube_search` (keyless yt-dlp/InnerTube discovery → ranked videos) / `youtube_watch` (download + transcribe locally with yapsnap + a frame per caption → a viewing package `watch.md` + `frames/` in `<game>/.claude-sbox/youtube/`, which you then Read since frames are images) / `youtube_status` (+ `youtube_install`). Flow: `youtube_search(topic)` → feed a result url to `youtube_watch`. For VIDEO; `learn_*` is for text tutorials. English audio; transcription is local. See `mcp-tools.md` § Watching tutorial videos + `watch-video.md`.
 - `reflection_*` (17): live `EditorTypeLibrary` walks: relationships, attribute discovery, type hierarchy, member metadata. Goes beyond signatures into discoverability.
 
+## sbox.game packages: download + reverse-engineer
+
+Pull and read public sbox.game packages. **Anonymous** — no login/session; only `Public` packages resolve (private → 404). Everything the platform ships to clients is **source**: code rides in `.cll` "code archives" (magic `GMCA` + LZ4 + JSON of raw C#/.razor, NOT compiled IL), so recovery is *reading*, not decompiling.
+
+- `package_search(query, type?, limit?, skip?)`: find packages → `{ident (org.package), title, type, summary}`. REST `/package/find/2`.
+- `package_info(ident)`: resolve metadata WITHOUT downloading — title/type/total_size/file_count/version + package & editor dependencies. `/package/get/2`. Size up a pull first.
+- `package_download(ident, output_dir?, recursive?, code_only?, unpack_code?, generate_project?, keep_archives?, overwrite?, concurrency?)`: engine-faithful pull to `{game}/.claude-sbox/downloads/<ident>/`. Recovers the file tree, explodes each `.cll` → original `.cs`/`.razor` source (`new Sandbox.CodeArchive(bytes)`, in-process), and regenerates a buildable `.sbproj` from the archive's `Compiler.Configuration`. `recursive` (default on) pulls deps into `_packages/`; bundled non-primary archives (e.g. `package.base`) split into `_bundled/`; `code_only` = fast source-only grab (`.cll` only).
+- `scfu_deobfuscate(path, write?, fold_predicates?)`: make SCFU-obfuscated (f4industries.scfu) source READABLE — Roslyn rewrite that decodes its encoded string literals back to plaintext and folds constant opaque predicates (`if (-88 > -90)`). Readability aid only: **preserves comments, copyright headers and LICENSE files; never strips attribution.** Point at a downloaded package folder or a single `.cs`.
+
+**Driving freshly-added tools**: a tool registered *after* the session connected isn't in your MCP list yet — call it through `dispatcher_batch(operations:[{tool, args}])` until the editor re-lists. `compile_project` to (re)register new handlers after editing the addon.
+
 ## Reflection / cross-reference
 
 - `reflection_find_types_with_attribute` / `_methods_with_attribute` / `_properties_with_attribute` / `_types_by_base_type` / `_resource_types_with_extension`: discovery.
