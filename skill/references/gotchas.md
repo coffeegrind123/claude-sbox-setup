@@ -1111,3 +1111,25 @@ A trace started at the player's eye (`Weapon_ShootPosition`-style muzzle/spawn/a
 
 ## Add a throwaway fire-path / event log to find "value is correct but has no effect" bugs (bridge can't inject input)
 The bridge cannot inject fire/mouse/movement, so a gameplay path that only runs on player input (weapon fire, melee, jump) can't be exercised from the MCP. When such a path misbehaves, add a **one-line `Log.Info($"[TAG] …")`** dumping the suspect values at the decision point, recompile, have the human trigger it once, then read it back with **`tail_log(min_level:"info")`** (filter your `[TAG]`). This turns "I think it's X" into ground truth in one round-trip. Log the values *after* every transform/trace that could mutate them (not just at compute time), include any cached-component null-state, and **remove the log once confirmed.** (It's how the rocket-spawn-collapse bug above was localized: the offset logged as 12 but the post-trace `rightDist` logged as 0.)
+
+## June-2026 tool additions: gotchas for the new families
+
+The lighting/terrain/overlap/resource/bone/anim-event tools (see `tool-families.md`) carry a few traps:
+
+- **`decal_place` takes a `.decal` DecalDefinition asset, NOT a material.** The modern `Decal` component is texture-based (`List<DecalDefinition>`); the old material-based `DecalRenderer` is `[Obsolete]`. Pass `decal: "decals/blood.decal"`, not a `.vmat`. `decal_list` reports both modern `decals` and `legacy_decal_renderers` separately.
+- **The bakes are async and only meaningful in the editor.** `envmap_bake[_all]` / `indirect_light_volume_bake[_all]` await the real bake (seconds). They mirror the per-probe button / Scene-menu actions; there's no runtime equivalent.
+- **`anim_set_bone_transform` is an override that animation reasserts.** It calls `SceneModel.SetBoneOverride`; a playing animation will overwrite the bone next frame unless paused (`scene_set_timescale 0`). Clear with `anim_clear_bone_overrides`. (Ties into the existing "bone GET = world space, SET = model space" rule above.)
+- **`anim_capture_events` returns `[]` if the model isn't animating during the window.** It subscribes for `duration_ms` then unsubscribes — so the model must actually be ticking an AnimationGraph in that window (editor preview or play mode). Empty result ≠ broken; it means nothing fired.
+- **`terrain_*` are read-only**; heightmap/splat writes need GPU/CPU texture sync and aren't exposed. World→cell mapping is internal (handles a rotated/translated terrain).
+- **`resource_list_by_type` resolves the type by name then reflectively calls `ResourceLibrary.GetAll<T>()`** — pass a `Resource` subtype name (`Surface`, `Model`, `SoundEvent`, `PrefabFile`…); a non-Resource type returns `type_not_found` with near-misses.
+- **`scene_overlap_*` are stationary** (`Scene.FindInPhysics`) — use these for "what's in this volume", NOT `scene_trace_*` with start==end (the traces are directional and report first-hit only).
+
+## Running the test suite over the bridge (operational — learned the hard way)
+
+The spec runner (`run_tests` / `start_test_run_job`) executes in-editor. Pitfalls:
+
+- **NEVER `cancel_job` an in-flight in-editor test run.** Cancellation isn't cleanly honored and wedges the editor + bridge (HTTP listener goes unreachable) → requires a full editor restart. Let runs finish, or restart the editor to abort.
+- **Don't run `start_test_run_job` with `tier=(all) + allow_mutating=true` casually.** `tier=all` pulls in heavy/long tier-1 specs that lack mocks (`bootstrap_engine`, `bootstrap_tests`, `start_compile_project_job`) and run **real** multi-minute builds — a full run can sit at 0% for 50+ min. Tiers 4/5 (interactive/long) are mocked via `Tests/Mocks/*.cs`; `skip_in_ci` specs are skipped. The sensible routine run is the **default scope: Tier 1 + churn** (no tier filter, `allow_mutating` off) — it exercises every read spec and finishes in minutes.
+- **Sync `run_tests` runs the whole suite on the MAIN THREAD** (freezes the UI/bridge for the run's duration) — fine for fast SelfCheck filters; use `start_test_run_job` (worker thread) for Tier-1 execution so the editor stays responsive.
+- **`bootstrap_tests build` (rebuilding `Tests.dll`) fails while the editor is open** — it copies `Base Editor Library.dll`, which the running editor locks (MSB3027). Rebuild it on a fresh editor start (the lock clears briefly) or with the editor closed. A stale `Tests.dll` makes the parity self-check (`EverySpec_RefersToARegisteredTool`) falsely red because its `Dispatcher` snapshot predates newly-registered tools.
+- **MSTest gives no mid-run progress** — `poll_job` shows `progress_percent: 0` until the run completes. Pace polls with long background `sleep` waits, don't hammer the bridge.

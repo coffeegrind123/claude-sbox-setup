@@ -1,6 +1,6 @@
 # Tool families: discovery index
 
-One-line index of every tool family the claude-sbox s&box bridge exposes. Use this when you'd otherwise be tempted to call `list_tools` (which returns ~580 entries). Grep this file for a topical keyword first: it's curated, list_tools isn't.
+One-line index of every tool family the claude-sbox s&box bridge exposes. Use this when you'd otherwise be tempted to call `list_tools` (which returns ~730 entries). Grep this file for a topical keyword first: it's curated, list_tools isn't.
 
 Rule of thumb: `family_prefix_*` means the editor exposes multiple tools sharing that prefix; `tool_name` (no prefix) means a single tool. **Counts reflect what's currently registered**; `auto_*` and `last_*`/`wait_for_*` grow when new attributes ship.
 
@@ -48,12 +48,16 @@ For full schemas + signatures of any tool, call `ToolSearch query="select:mcp__s
 - `frame_selection`: center editor camera.
 - `save_scene` / `save_all_scenes` / `list_unsaved_scenes` / `list_unsaved_resources`: persistence.
 - `get_scene_bounds` / `get_selection_bounds`: world AABBs.
+- `scene_get_stats`: composition snapshot — GameObject + component counts grouped by type, plus renderer/light/collider/rigidbody/particle rollups. Tedious to assemble by hand.
+- `scene_set_timescale`: get/set `Scene.TimeScale` (0..1) — pause/slow-mo for frame-by-frame physics/anim debugging.
+- **Tags**: `gameobject_list_tags` / `gameobject_add_tag` / `gameobject_remove_tag` (tag/tags/clear_all; undo-scoped). Read+write the tags `select_by_tag` queries.
 
 ## Inspector / property writes
 
 - `list_properties` / `get_property` / `set_property`: inspector-visible; goes through editor undo. Always verify `previous`/`current` (see gotchas).
 - `list_component_buttons` / `invoke_button`: `[Button]`-tagged component methods (Build Terrain / Reset / etc.).
 - `set_prefab_ref`: assign a loaded prefab to a GameObject-typed property (set_property can't).
+- **Component-action wrappers** (instance `[Button]`s the generic `auto_*` layer can't reach — those are static-only): `prop_break_apart(id)` (Prop → procedural sub-components, undo-scoped), `clutter_generate(id)` / `clutter_clear(id)` (ClutterComponent scatter/clear).
 
 ## Selection
 
@@ -77,6 +81,8 @@ For full schemas + signatures of any tool, call `ToolSearch query="select:mcp__s
 - **Override**: `asset_set_in_memory_override` / `_clear_in_memory_override`.
 - **Thumbnail**: `asset_render_thumbnail` / `_rebuild_thumbnail`.
 - **Tags**: `asset_get_tags` / `_set_tags` (mode: add/remove/replace).
+- **Resource JSON / metadata**: `asset_read_json` (raw GameResource source text), `resource_validate_json` (syntax + optional typed `LoadFromJson` validation BEFORE compiling — pass `type` e.g. `SoundEvent`), `asset_metadata_get` / `asset_metadata_set` (the `.meta` sidecar KV store: publish flags, orientation, custom keys).
+- **Resource enumeration**: `resource_list_by_type` (every loaded `Resource` of a type-name via reflective `ResourceLibrary.GetAll<T>()` — pass `type` like `Surface`/`Model`/`SoundEvent`), `surface_list` (physics Surfaces with friction/elasticity/density/bounce).
 
 ## Compile + hotload
 
@@ -200,7 +206,8 @@ Read engine source / addon source / editor caches without a bind mount. **All re
 
 ## Scene physics
 
-- `scene_trace_ray` / `_sphere` / `_box`: sweep traces with hit lists, tag filters, ignore lists.
+- `scene_trace_ray` / `_sphere` / `_box`: sweep traces (directional, from→to) with hit lists, tag filters, ignore lists.
+- `scene_overlap_sphere` / `scene_overlap_box`: **stationary volume overlap** ("what GameObjects are inside this region?") via `Scene.FindInPhysics` — not a directional trace. Returns id/name/distance/tags.
 - `scene_camera_info` / `scene_physics_world_info`: read-only scene queries.
 
 ## Physics setup composites
@@ -216,11 +223,14 @@ Read engine source / addon source / editor caches without a bind mount. **All re
 
 ## Navigation
 
-- `navmesh_get_closest_point` / `_get_simple_path` / `_calculate_path` (status+waypoints) / `_status`.
+- `navmesh_get_closest_point` / `_get_simple_path` / `_calculate_path` (status+waypoints) / `_status`: query.
+- `navmesh_set_config` (agent radius/height/step/slope + body-inclusion flags; marks dirty) / `navmesh_generate` (async (re)build whole mesh, or a bbox region via mins/maxs): authoring. (`navmesh_status` already returns the current config — there's no separate get_config.)
 
 ## Animation
 
-- **Runtime (live SceneModel)**: `anim_get_parameter_{bool,int,float,vector,rotation}` / `_set_parameter`. `anim_set_ik_target` / `_clear_ik`. `anim_morph_set` / `_get` / `_clear`. `anim_get_bone_transform` / `_get_all_bone_transforms` / `_get_bone_velocity` / `_get_attachment`.
+- **Runtime (live SceneModel)**: `anim_get_parameter_{bool,int,float,vector,rotation}` / `_set_parameter`. `anim_set_ik_target` / `_clear_ik`. `anim_morph_set` / `_get` / `_clear`; `morph_list` (enumerate all blendshape names + current weights — gives the names `anim_morph_get/set` need). `anim_get_bone_transform` / `_get_all_bone_transforms` / `_get_bone_velocity` / `_get_attachment`.
+- **Posing (bone overrides)**: `anim_set_bone_transform(gameobject_id, bone_name, position?/rotation?/scale?)` → `SceneModel.SetBoneOverride`; `anim_clear_bone_overrides` returns all bones to animation control. (Names via `model_list_bones`.)
+- **Event capture**: `anim_capture_events(gameobject_id, duration_ms)` — subscribe to footstep/sound/generic/anim-tag events for a bounded window, return them in order. Subscription is local to the call (no persistent listener; safe across hotload). Returns `[]` if the model isn't animating during the window.
 - **Playback preview**: `animgraph_get_preview_model` / `_set_preview_model` / `_get_sequences` / `_play_sequence` / `_get_playback_state` / `_set_playback_time` / `_stop_playback`.
 - **Animgraph asset READ (`.vanmgrph` KV3 source)**: `animgraph_source_inspect` (nodes, connections, parameters, and state machines with transition conditions resolved to parameter names — this is how you find which transition/sequence drives an animation, e.g. a weapon draw) / `animgraph_source_serialize` (raw KV3→JSON) / `animgraph_list_node_classes` (catalog of native `C*AnimNode` classes + property keys, harvested from disk).
 - **Animgraph asset EDIT (`.vanmgrph` KV3 source)**: `animgraph_edit_load` → mutate → `animgraph_edit_verify` (non-destructive serialize+reparse) → `animgraph_edit_save` (backup + write + recompile; `dry_run` supported). Mutations: `animgraph_set_node_property` (e.g. `m_sequenceName`, `m_bLoop`), `animgraph_connect` / `animgraph_disconnect`, `animgraph_add_node` (clone-template, in-graph or from another `.vanmgrph`), `animgraph_delete_node`, `animgraph_set_transition_disabled` (kill a state-machine edge — e.g. stop a draw state being entered). **These edit the source file, NOT `nodegraph_*`** (animgraph is native, not an `IGraph` — see "Action graph + node graph").
@@ -240,6 +250,25 @@ Read engine source / addon source / editor caches without a bind mount. **All re
 - `material_get_shader_parameters` / `material_set_shader_parameter` (in-memory; .vmat untouched).
 - `shader_compile_and_check` / `shader_get_compile_results` / `shadergraph_list_parameters`.
 - `texture_get_info` / `list_loaded_textures` / `screenshot_scene_to_file`.
+
+## Lighting + environment
+
+The scene's lighting/environment component surface (none of this was reachable before — read+author lights, probes, fog, sky, decals; bakes are async editor features normally driven by a button/menu click).
+
+- `lighting_list`: every Light (directional/point/spot) + EnvmapProbe + IndirectLightVolume + SkyBox2D, with key per-type props (color, shadows, radius, cone, cascades, probe density, bake mode).
+- `envmap_bake(id)` / `envmap_bake_all`: bake reflection probe(s) — async; `_all` is the Scene→Bake Envmaps action.
+- `indirect_light_volume_bake(id)` / `indirect_light_volume_bake_all`: bake DDGI probe grid(s) — async.
+- `post_process_list`: PostProcessVolumes + the effect components on each (tonemap/bloom/grading/AO/DoF…).
+- `fog_list`: GradientFog + VolumetricFogVolume components. `skybox_get`: SkyBox2D material/tint/indirect.
+- `decal_list`: projected `Decal` (modern, texture-based) + legacy `DecalRenderer`. `decal_place(decal, position, …)`: create a `Decal` GameObject from a **`.decal` DecalDefinition asset** (NOT a material — `DecalRenderer` is obsolete), with size/depth/rotation/tint; undo-scoped.
+
+## Terrain
+
+Read-only introspection of the `Terrain` component's `TerrainStorage` (heightmap + control/splat map + material palette). World↔grid mapping handled internally (rotated/translated terrain OK).
+
+- `terrain_get_info`: resolution, world size/height, cell size, material palette (index→path). Optional `id`, else first terrain.
+- `terrain_get_height_at(x, y)`: raw 16-bit sample + local height + world Z + grid cell.
+- `terrain_sample_material_at(x, y)`: base/overlay texture id + blend + hole flag + resolved material paths.
 
 ## Audio mixer
 

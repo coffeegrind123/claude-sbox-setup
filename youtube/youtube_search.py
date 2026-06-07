@@ -24,10 +24,35 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 
 
 def eprint(*a, **k):
     print(*a, file=sys.stderr, **k)
+
+
+def entry_age_days(e) -> "int | None":
+    """Best-effort age in days from a flat search entry.
+
+    Flat search entries from recent yt-dlp usually carry `timestamp` (epoch seconds);
+    some carry `upload_date` (YYYYMMDD). Returns None when neither is present so the
+    recency re-rank degrades gracefully (unknown-date videos sort after known-recent ones).
+    """
+    ts = e.get("timestamp")
+    if isinstance(ts, (int, float)) and ts > 0:
+        try:
+            d = datetime.fromtimestamp(ts, tz=timezone.utc)
+            return max(0, (datetime.now(timezone.utc) - d).days)
+        except Exception:
+            pass
+    ud = e.get("upload_date")
+    if isinstance(ud, str) and len(ud) == 8 and ud.isdigit():
+        try:
+            d = datetime.strptime(ud, "%Y%m%d").replace(tzinfo=timezone.utc)
+            return max(0, (datetime.now(timezone.utc) - d).days)
+        except Exception:
+            pass
+    return None
 
 
 def fmt_duration(seconds) -> str:
@@ -49,6 +74,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--limit", type=int, default=10, help="Max results (default 10).")
     ap.add_argument("--sort", choices=["relevance", "date", "views"], default="relevance",
                     help="Result ordering (default relevance). 'date' = newest, 'views' = most viewed.")
+    ap.add_argument("--recent-days", type=int, default=30,
+                    help="Soft recency PREFERENCE (default 30): videos uploaded within this many "
+                         "days are floated to the top while preserving relevance order within each "
+                         "group (not a hard filter — older videos still appear below). 0 disables. "
+                         "Ignored for --sort date/views (those have an explicit order).")
     ap.add_argument("--json", action="store_true", help="Print the results JSON to stdout.")
     args = ap.parse_args(argv)
 
@@ -60,6 +90,13 @@ def main(argv: list[str] | None = None) -> int:
 
     limit = max(1, min(args.limit, 50))
 
+    # Recency preference is a soft re-rank applied only to relevance ordering (date/views
+    # already impose their own order). When active we fetch a larger candidate pool so
+    # there's room to float recent videos up without dropping relevant older ones.
+    recent_days = max(0, args.recent_days)
+    recency_on = recent_days > 0 and args.sort == "relevance"
+    poolsize = min(50, max(limit * 3, 25)) if recency_on else limit
+
     # yt-dlp search providers. There's no general server-side sort, but it ships a couple
     # of ordered variants; fall back to plain relevance ytsearch otherwise.
     provider = {
@@ -67,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         "date": "ytsearchdate",   # newest first
         "views": "ytsearch",      # no view-sorted provider; we sort client-side below
     }.get(args.sort, "ytsearch")
-    search_term = f"{provider}{limit}:{args.query}"
+    search_term = f"{provider}{poolsize}:{args.query}"
 
     ydl_opts = {
         "quiet": True,
@@ -91,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     results = []
     for e in entries:
         vid = e.get("id") or ""
+        age = entry_age_days(e)
         results.append({
             "id": vid,
             "title": e.get("title") or "",
@@ -101,14 +139,34 @@ def main(argv: list[str] | None = None) -> int:
             "duration_seconds": e.get("duration"),
             "view_count": e.get("view_count"),
             "live": e.get("live_status") in ("is_live", "is_upcoming"),
+            "upload_date": e.get("upload_date"),
+            "age_days": age,
+            "recent": (age is not None and age <= recent_days) if recent_days > 0 else None,
         })
 
     # ytsearch has no view-sorted provider; honor --sort views client-side.
     if args.sort == "views":
         results.sort(key=lambda r: r.get("view_count") or 0, reverse=True)
 
+    # Soft recency preference: float videos uploaded within --recent-days to the top while
+    # preserving the underlying relevance order within each group (stable sort). Videos with
+    # an unknown upload date sort with the "older" group (we can't confirm they're recent),
+    # so known-recent videos always win, but nothing relevant is dropped — just reordered.
+    recent_hits = 0
+    if recency_on:
+        recent_hits = sum(1 for r in results if r.get("recent"))
+        results.sort(key=lambda r: 0 if r.get("recent") else 1)  # stable: keeps relevance within group
+
     results = results[:limit]
-    manifest = {"query": args.query, "sort": args.sort, "count": len(results), "results": results}
+    manifest = {
+        "query": args.query,
+        "sort": args.sort,
+        "recent_days": recent_days,
+        "prefer_recent": recency_on,
+        "recent_in_pool": recent_hits,
+        "count": len(results),
+        "results": results,
+    }
 
     eprint(f"[youtube-search] {len(results)} result(s)")
     if args.json:
