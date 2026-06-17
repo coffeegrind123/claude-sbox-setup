@@ -61,6 +61,7 @@ public static class SboxSourceCleaner
 		code = StripRedundantDefaultValue( code, stats );
 		code = FixCompoundRefAssign( code, stats );
 		code = FixExplicitInterfaceProps( code, stats );
+		code = FixRedundantBoolCoalesce( code, stats );
 		return code;
 	}
 
@@ -329,6 +330,14 @@ public static class SboxSourceCleaner
 
 	static string FixExplicitInterfaceProps( string code, Stats s ) =>
 		ExplicitIfaceProp.Replace( code, m => { s.AccessorCalls++; return $"{m.Groups[1].Value} => {m.Groups[2].Value};"; } );
+
+	// ILSpy sometimes emits "(x?.Flag == true) ?? false" — but "nullable == true" already yields a
+	// non-nullable bool (null → false), so the trailing "?? false/true" is both dead and illegal
+	// (CS0019 "?? on bool and bool"). Drop it; the "== bool" comparison preserves the intended logic.
+	static readonly Regex RedundantBoolCoalesce = new( @"(==\s*(?:true|false)\))\s*\?\?\s*(?:true|false)\b", RegexOptions.Compiled );
+
+	static string FixRedundantBoolCoalesce( string code, Stats s ) =>
+		RedundantBoolCoalesce.Replace( code, m => { s.NullCoalesce++; return m.Groups[1].Value; } );
 
 	// ───────────────────────── helpers ─────────────────────────
 

@@ -78,21 +78,20 @@ public static class Entry
 		{
 			var settings = new DecompilerSettings { ThrowOnAssemblyResolveErrors = false };
 
-			CSharpDecompiler decompiler;
-			if ( refDirs.Count > 0 )
-			{
-				var resolver = new UniversalAssemblyResolver( dll, settings.ThrowOnAssemblyResolveErrors, null );
-				foreach ( var d in refDirs )
-					if ( !string.IsNullOrEmpty( d ) && Directory.Exists( d ) )
-						resolver.AddSearchDirectory( d );
-				decompiler = new CSharpDecompiler( dll, resolver, settings );
-			}
-			else
-			{
-				decompiler = new CSharpDecompiler( dll, settings );
-			}
+			var resolver = new UniversalAssemblyResolver( dll, settings.ThrowOnAssemblyResolveErrors, null );
+			foreach ( var d in refDirs )
+				if ( !string.IsNullOrEmpty( d ) && Directory.Exists( d ) )
+					resolver.AddSearchDirectory( d );
 
-			code = decompiler.DecompileWholeModuleAsString();
+			// PrefetchEntireImage reads the whole assembly into memory and closes the file handle
+			// immediately, so the .dll isn't left memory-mapped/locked after decompiling — the caller
+			// renames .bin/ to .bin.disabled to build from source, which fails on Windows if we hold a
+			// handle. The using disposes the module too.
+			using ( var module = new PEFile( dll, PEStreamOptions.PrefetchEntireImage ) )
+			{
+				var decompiler = new CSharpDecompiler( module, resolver, settings );
+				code = decompiler.DecompileWholeModuleAsString();
+			}
 			if ( cleanup )
 				code = SboxSourceCleaner.Clean( code, out cleanStats );
 		}
