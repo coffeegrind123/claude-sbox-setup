@@ -3,6 +3,7 @@ using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using ICSharpCode.Decompiler;
 using ICSharpCode.Decompiler.CSharp;
+using ICSharpCode.Decompiler.Metadata;
 
 namespace ClaudeSbox.Decompiler.Driver;
 
@@ -57,15 +58,43 @@ public static class Entry
 		var outDir = Str( root, "outDir" );
 		bool inline = root.TryGetProperty( "inline", out var inl ) && inl.ValueKind == JsonValueKind.True;
 
+		// Reference directories for the resolver. Passing the engine's managed assemblies (and the
+		// package's own .bin deps) lets ICSharpCode.Decompiler resolve types, which raises output
+		// fidelity dramatically — auto-properties, extension-method syntax, object initializers and
+		// real conversions instead of <>k__BackingField / static-call / op_Implicit / (ref)-cast
+		// fallbacks. Empirically this alone removes the bulk of the recompilation artifacts.
+		var refDirs = StrArray( root, "refDirs" );
+
+		// s&box source cleanup (strip [SourceLocation] + generated [Sync]/[ConVar] members, fix the
+		// residual decompiler artifacts). Defaults ON; the produced source targets the s&box compiler.
+		bool cleanup = !( root.TryGetProperty( "cleanup", out var cu ) && cu.ValueKind == JsonValueKind.False );
+
 		if ( string.IsNullOrEmpty( dll ) || !File.Exists( dll ) )
 			return Err( "dll_not_found", $"assembly not found: {dll ?? "(null)"}" );
 
 		string code;
+		SboxSourceCleaner.Stats cleanStats = null;
 		try
 		{
 			var settings = new DecompilerSettings { ThrowOnAssemblyResolveErrors = false };
-			var decompiler = new CSharpDecompiler( dll, settings );
+
+			CSharpDecompiler decompiler;
+			if ( refDirs.Count > 0 )
+			{
+				var resolver = new UniversalAssemblyResolver( dll, settings.ThrowOnAssemblyResolveErrors, null );
+				foreach ( var d in refDirs )
+					if ( !string.IsNullOrEmpty( d ) && Directory.Exists( d ) )
+						resolver.AddSearchDirectory( d );
+				decompiler = new CSharpDecompiler( dll, resolver, settings );
+			}
+			else
+			{
+				decompiler = new CSharpDecompiler( dll, settings );
+			}
+
 			code = decompiler.DecompileWholeModuleAsString();
+			if ( cleanup )
+				code = SboxSourceCleaner.Clean( code, out cleanStats );
 		}
 		catch ( Exception e )
 		{
@@ -87,11 +116,19 @@ public static class Entry
 		var fLines = lines;
 		var fFile = outFile;
 		var fInline = inline || outFile == null;
+		var fRefs = refDirs.Count;
+		var fStats = cleanStats;
 		return Ok( w =>
 		{
 			w.WriteString( "assembly", asmName );
 			w.WriteNumber( "length", code.Length );
 			w.WriteNumber( "lines", fLines );
+			w.WriteNumber( "ref_dirs", fRefs );
+			if ( fStats != null )
+			{
+				w.WriteString( "cleanup", fStats.ToString() );
+				w.WriteBoolean( "cleaned", true );
+			}
 			if ( fFile != null ) w.WriteString( "output_file", fFile );
 			if ( fInline ) w.WriteString( "source", code );
 		} );
@@ -173,6 +210,15 @@ public static class Entry
 	// ───────────────────────── helpers (mirror the codesearch driver) ─────────────────────────
 
 	static string Str( JsonElement e, string n ) => e.TryGetProperty( n, out var v ) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+	static List<string> StrArray( JsonElement e, string n )
+	{
+		var list = new List<string>();
+		if ( e.TryGetProperty( n, out var v ) && v.ValueKind == JsonValueKind.Array )
+			foreach ( var item in v.EnumerateArray() )
+				if ( item.ValueKind == JsonValueKind.String ) list.Add( item.GetString() );
+		return list;
+	}
 
 	static string Ok( Action<Utf8JsonWriter> body )
 	{
