@@ -1,0 +1,43 @@
+# claude-sbox source-sanitizer benign replacement pool. A matched bad word is mapped to one of these
+# by a stable FNV hash (so 'nuke' always becomes the same safe word, across files and runs), made
+# injective on collision. One benign word per line; '#' starts a comment. Add more for less repetition.
+watermelon
+banana
+pancake
+sunflower
+marshmallow
+cupcake
+noodle
+pillow
+bubble
+kitten
+puppy
+muffin
+pretzel
+waffle
+blanket
+teddy
+cookie
+lollipop
+jellybean
+rainbow
+butterfly
+daisy
+peach
+mango
+biscuit
+dumpling
+donut
+popcorn
+snuggle
+giggle
+pebble
+clover
+maple
+willow
+pumpkin
+honey
+ginger
+hazel
+olive
+poppy

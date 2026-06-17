@@ -1,0 +1,66 @@
+# claude-sbox source-sanitizer DEFAULT denylist.
+# Resides in claude-sbox-setup (NOT in the published claude-sbox addon) and is loaded at runtime —
+# same pattern as the decompiler driver. Edit freely; no addon rebuild needed (it's read per run).
+#
+# These are genuinely-dangerous REAL-WORLD WMD / CBRN / bioterror terms (plus the explicitly
+# requested nuke/nuclear/chemical) — the vocabulary an adversarial package would use to trip an AI
+# agent's safety reasoning. Canonical lowercase form, one per line; '#' starts a comment.
+#
+# DELIBERATELY EXCLUDED: ordinary game-combat words (bomb, explosive, detonate, weapon, terrorist,
+# jihad, kill, sniper, grenade, rocket, missile, ammo). Those are normal in legit game code (TTT is
+# literally "Trouble in Terrorist Town") and a reasonable agent isn't tripped by them. They live in
+# denylist-strict.txt and are only added when the caller passes strict:true.
+# Validated: 0/25,318 collateral renames on the real TTT decompile with this default list.
+
+# --- nuclear / radiological ---
+nuke
+nuclear
+uranium
+plutonium
+thermonuclear
+warhead
+fissile
+radiological
+dirtybomb
+weaponsgrade
+enrichuranium
+
+# --- chemical weapons ---
+chemical
+sarin
+tabun
+soman
+novichok
+mustardgas
+phosgene
+nerveagent
+blisteragent
+organophosphate
+chlorinegas
+saringas
+vxnerve
+
+# --- biological weapons ---
+anthrax
+botulinum
+ricin
+smallpox
+bioweapon
+weaponizedvirus
+bioterror
+weaponizedanthrax
+pathogenrelease
+
+# --- high-yield / terror explosives (malicious framings only — not generic "bomb"/"explosive") ---
+tatp
+semtex
+petn
+ammoniumnitrate
+pipebomb
+suicidebomb
+carbomb
+plasticexplosive
+
+# --- mass-casualty / terror ---
+masscasualty
+genocide

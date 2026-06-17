@@ -47,21 +47,15 @@
 
       4. (continued, see entry 4 above for StartupLoadProject.cs.)
 
-      9. engine/Sandbox.Engine/Services/Packages/PackageManager/
-         PackageManager.ActivePackage.cs. The CLOUD-MOUNT counterpart to
-         patch 3's publish-compile AccessControl null-out. When a user
-         installs ghage.claude-sbox from sbox.game, the addon is mounted
-         by ActivePackage.CompileCodeArchive, which sets
-         group.AccessControl = AccessControl on its own CompileGroup and
-         triggers the same whitelist check at mount time -- so users
-         who DON'T have the addon source-cloned at game/addons/claude-sbox/
-         can't load the addon either. Project.Compiling.cs:56 already
-         sets Whitelist=false for tool projects loaded via the source
-         path; this patch mirrors that by nulling AccessControl for
-         tool-type packages in the cloud-mount path. Patch 3's
-         AccessControl block fixes the publishing side; patch 9 fixes
-         the consuming side -- both needed for end-to-end cloud
-         distribution of a tool addon.
+      9. RETIRED (2026-06-16). Was a cloud-mount whitelist null-out inside
+         ActivePackage.CompileCodeArchive. Upstream #5038 ("Load precompiled
+         dlls from the manifest, no longer load clls") deleted CompileCodeArchive
+         entirely -- the client no longer Roslyn-compiles .cll archives at mount
+         time, it loads precompiled .dll assemblies straight from the package
+         manifest. The patch's anchor is gone, so the patch is gone. The
+         consuming-side whitelist is now handled solely at DLL-load time by
+         patch 10 (LoadAssemblyFromPackage), which is the path #5038 routes
+         through. No replacement needed.
 
       10. engine/Sandbox.Engine/Services/Packages/PackageManager/
           PackageLoader.cs. Patch 9 fixed the cloud-mount COMPILE-time
@@ -77,8 +71,9 @@
           .CodeAnalysis.CSharp / Facepunch.ActionGraphs / ...'" from
           AccessControl.VerifyAssembly's metadata walker. Patch 10
           extends the skip to remote tool assemblies. End-user-facing --
-          every cloud-install user needs this patch applied, paired
-          with patch 9.
+          every cloud-install user needs this patch applied. (Since #5038
+          deleted the mount-time compile path that retired patch 9 covered,
+          patch 10 is now the ONLY consuming-side whitelist gate.)
 
       11. engine/Sandbox.Tools/StartupLoadProject.cs (second insertion in
           the same file as patch 4, immediately before patch 4's
@@ -93,13 +88,15 @@
           AFTER patch 4's auto-mount. Without patch 11 the order is
           wrong and the addon throws System.IO.FileNotFoundException
           for package.toolbase during static-ctor init, even though
-          patches 9 + 10 already cleared the whitelist gates.
+          patch 10 already cleared the whitelist gate.
           PackageManager.InstallAsync is idempotent so the later
           InstallProjects re-install of toolbase becomes a no-op.
 
-    Seven patches in total (file numbers 0001-0004 + 0009-0011 -- gaps
-    are deliberate, see patch 3 history above). This script applies all
-    seven to the parent sbox-public checkout. It is idempotent:
+    Six documented patches (file numbers 0001-0004 + 0010-0011; 0009
+    retired by #5038, gaps deliberate, see patch 3 history above). The
+    patches/ dir also carries 0012-0013, hand-maintained the same way.
+    This script applies every patches/*.patch to the parent sbox-public
+    checkout. It is idempotent:
     re-running on a checkout where the patches are already applied is a
     no-op.
 

@@ -1,0 +1,17 @@
+# claude-sbox source-sanitizer STRICT-tier extra terms (added only when the caller passes strict:true).
+# These are ordinary game-combat words — including them WILL rename legit shooter code (e.g. TTT's own
+# weapons, "Trouble in Terrorist Town" → "Trouble in Teddy Town"). Use only when you want every
+# alarming term gone and accept the collateral; the rename-map preserves the originals either way.
+# One canonical lowercase term per line; '#' starts a comment.
+bomb
+explosive
+detonate
+detonator
+weapon
+weaponize
+terrorist
+jihad
+massacre
+atrocity
+slaughter
+execution

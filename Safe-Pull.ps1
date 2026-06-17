@@ -158,7 +158,6 @@ $expectedPatches = @{
     'engine/Sandbox.Engine/Systems/Project/Project/Project.Static.cs' = 'AddFromFileBuiltIn( "addons/claude-sbox/.sbproj" )'
     'engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs' = 'project.Config.Type == "tool"'
     'engine/Sandbox.Tools/StartupLoadProject.cs' = '.sbox-global'
-    'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs' = 'Package.TypeName == "tool"'
     'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageLoader.cs' = 'Extend the "tool assemblies'
     'engine/Sandbox.Tools/Utility/ProjectPublisher/PackageManifest.cs' = 'file.Contains( "/unittest/"'
     'engine/Sandbox.Tools/Utility/ProjectPublisher/ProjectPublisher.cs' = 'a.AbsolutePath.Contains( "/unittest/"'
@@ -404,12 +403,24 @@ foreach ($entry in $enginePatches.GetEnumerator()) {
     Ok "wrote $patchPath ($([int]((Get-Item $patchPath).Length / 1)) bytes)"
 }
 
-# Authoritative list of engine files the patches touch. Derived from
-# $expectedPatches minus the .gitignore key. We reset all of these to HEAD
-# so the pull has a clean tree for those paths, then re-apply every patch
-# in patches/ — covering both the regeneratable patches in $enginePatches
-# and the hand-maintained 0011 that shares StartupLoadProject.cs with 0004.
-$patchedEngineFiles = $expectedPatches.Keys | Where-Object { $_ -ne '.gitignore' }
+# Authoritative list of engine files the patches touch. Start from the tracked
+# $expectedPatches map (minus .gitignore), then UNION IN every path any on-disk
+# patch actually targets — parsed from its `+++ b/<path>` headers. We reset all
+# of these to HEAD so the pull has a clean tree for those paths, then re-apply
+# every patch in patches/. Deriving targets from the patch files (not just the
+# map) auto-covers hand-maintained / gitignored local patches that aren't listed
+# in $expectedPatches (e.g. a developer's own engine tweak): their target file is
+# reverted to a clean HEAD before the pull, so if upstream also edited it the
+# stash-pop / re-apply won't collide. No per-file entry needed here.
+$mappedFiles = $expectedPatches.Keys | Where-Object { $_ -ne '.gitignore' }
+$patchTargets = @()
+Get-ChildItem (Join-Path $SetupDir 'patches') -Filter '*.patch' -ErrorAction SilentlyContinue | ForEach-Object {
+    Select-String -Path $_.FullName -Pattern '^\+\+\+ b/(.+?)\s*$' -AllMatches | ForEach-Object {
+        $p = $_.Matches[0].Groups[1].Value.Trim()
+        if ($p -and $p -ne '/dev/null') { $patchTargets += $p }
+    }
+}
+$patchedEngineFiles = @($mappedFiles + $patchTargets | Select-Object -Unique)
 
 Step "Reverting patched engine files to HEAD (clean state for pull)"
 foreach ($sourcePath in $patchedEngineFiles) {

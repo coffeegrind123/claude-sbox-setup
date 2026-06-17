@@ -24,7 +24,14 @@ Thumbs.db
 codesearch-driver/bin/
 codesearch-driver/obj/
 
+# decompiler driver build artifacts (source-only in git; output goes to <game>/.claude-sbox/)
+decompiler-driver/bin/
+decompiler-driver/obj/
+
 # yapwatch viewing-package output + its self-managed venv (lives in ~/.claude-sbox/)
 yapwatch/yapwatch-out/
 yapwatch-out/
 yapwatch/venv/
+
+# Local-only engine tweak, kept out of the shipped patch set (survives pulls, never committed).
+patches/0014-local-engine-overrides.patch

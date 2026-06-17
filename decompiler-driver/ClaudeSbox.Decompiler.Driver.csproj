@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<!--
+		The package decompiler driver. Source lives in the claude-sbox-setup repo (NOT in the
+		published claude-sbox addon). Built by normal `dotnet publish` via
+		../Build-Decompiler-Driver.{bat,sh} (or the decompiler_install MCP tool); output (this DLL +
+		ICSharpCode.Decompiler.dll + its deps) is deployed to the game's global store
+		<game>/.claude-sbox/decompiler-driver/runtime/, where the s&box addon loads it at runtime via
+		Assembly.LoadFrom and decompiles IN-PROCESS through a single reflection entrypoint.
+
+		WHY A DRIVER — since #5038 ("Load precompiled dlls from the manifest, no longer load clls")
+		sbox.game packages ship their C# as precompiled managed assemblies (.bin/package.*.dll), not
+		.cll source archives. To recover readable C# from those we need ILSpy's ICSharpCode.Decompiler,
+		but s&box's in-editor Roslyn compiler resolves addon refs only from bin/managed/*.dll +
+		Libraries/ and IGNORES NuGet — so the addon CAN'T reference ICSharpCode.Decompiler at compile
+		time. Same play as the codesearch driver: a prebuilt driver DLL fetched on demand and loaded at
+		runtime keeps the published addon source-only while everything still runs in one process.
+
+		Targets the same TFM as the editor runtime so the DLL loads cleanly into the editor ALC.
+	-->
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<AssemblyName>ClaudeSbox.Decompiler.Driver</AssemblyName>
+		<RootNamespace>ClaudeSbox.Decompiler.Driver</RootNamespace>
+		<LangVersion>14</LangVersion>
+		<Nullable>disable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<GenerateDocumentationFile>false</GenerateDocumentationFile>
+		<OutputType>Library</OutputType>
+		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<!-- 9.1.0.7988 is the version proven to decompile current sbox.game assemblies cleanly
+		     (matches the ilspycmd build used out-of-band). Bumping needs a re-verify against a
+		     freshly-published package. -->
+		<PackageReference Include="ICSharpCode.Decompiler" Version="9.1.0.7988" />
+	</ItemGroup>
+
+</Project>

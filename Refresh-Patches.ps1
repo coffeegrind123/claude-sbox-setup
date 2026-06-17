@@ -92,7 +92,6 @@ $patchedFiles = [ordered]@{
     'engine/Tools/SboxBuild/Steps/DownloadPublicArtifacts.cs'         = '0002-sboxbuild-dedupe-manifest-paths.patch'
     'engine/Sandbox.Tools/Utility/Utility.Projects.Compile.cs'        = '0003-publish-compile-tool-type-projects.patch'
     'engine/Sandbox.Tools/StartupLoadProject.cs'                      = '0004-startuploadproject-claude-sbox-global-install.patch'
-    'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs' = '0009-cloud-mount-skip-whitelist-for-tool-packages.patch'
     'engine/Sandbox.Engine/Services/Packages/PackageManager/PackageLoader.cs' = '0010-packageloader-trust-remote-tool-assemblies.patch'
     # Patch 0011 also touches StartupLoadProject.cs (second block, just before
     # patch 0004's InstallAsync of claude-sbox). Hand-maintained alongside 0004
