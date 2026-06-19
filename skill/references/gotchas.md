@@ -652,9 +652,22 @@ texture, not just at mip 0 (lower mips average the whole image).
   fails with "could not serialize tool result: Operation is not valid due
   to the current state of the object." Use `schema_lookup_type` (dump the
   whole type, grep the methods array) or `reflection_get_method_signature`
-  instead. `execute_csharp` needs the Roslyn scripting assembly loaded
-  (after the first engine compile); on a fresh/headless process it returns
-  `scripting_unavailable` — fall back to `compile_snippet` for static checks.
+  instead. `execute_csharp` compiles your snippet into an in-memory assembly
+  with the **in-process Roslyn compiler** (`Microsoft.CodeAnalysis.CSharp`,
+  which s&box ships) and invokes it — it does NOT use the Roslyn *scripting*
+  package (s&box doesn't ship that; the old `scripting_unavailable` failure is
+  gone). Gotchas: a snippet can only reference **file-backed** assemblies, so
+  the game's OWN code and the addon's own types (compiled in-memory, no
+  `Location`) aren't referenceable — reach game/runtime types via
+  `Game.TypeLibrary.GetType("Ns.Type").TargetType` + reflection;
+  `System`/`Linq`/`Sandbox`/`Editor` are auto-imported and work directly. A
+  trailing expression returns its value; explicit `return` works; void → null.
+
+## Launching a decompiled game (map loads but no player spawns)
+
+- A `package_download`-recovered networked game boots through its own menu **only if** the regenerated `.sbproj` Metadata has `SystemScene` (the scene holding the gamemode prefab — `GameMode`/`GameNetworkManager`/round systems). The engine's `Scene.AddSystemScene()` reads `Application.GamePackage.GetMeta("SystemScene")` on scene load; if it's empty the gamemode never loads → map loads but no player ever spawns (black/loading screen). The downloader now recovers this from the package API (`recovered_project_metadata_keys`), so fresh downloads boot.
+- The host's OWN connection only goes `active` (`Connection.IsActive`, i.e. `State == Connected` → `INetworkListener.OnActive` → pawn spawn) **after `Networking.CreateLobby(config)`** runs. The game's menu "host/start" path calls it; a bare `changelevel`/`Game.ChangeScene` does NOT — so a console map-change leaves the host `Unconnected` and spawns nothing.
+- **The editor caches `.sbproj` Metadata at project load.** Editing the `.sbproj` of an ALREADY-LOADED project doesn't take effect (even across a restart that restores the cached project) — `Project.Config.Metadata` keeps the stale keys. A FRESHLY-downloaded project (never loaded) parses clean. To force it on a loaded project: reflect `Application.GamePackage.Project.Config` and call `SetMeta("SystemScene", "scenes/system.scene")`, then reload the scene so `AddSystemScene` re-runs.
 
 ## Live runtime debugging without a debugger (read component state over the bridge)
 
