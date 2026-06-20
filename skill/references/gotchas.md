@@ -289,12 +289,49 @@ changes hotload fine — only a **type change on an existing field** triggers th
 discard. After an unavoidable type change, re-run whatever rebuilds the runtime
 data (`[Button] Reload`, re-run the generator) rather than trusting the hotload.
 
+## Static delegates wedge the hotloader (and then the whole editor)
+
+A `static` field/collection that **holds a delegate** — `Action<>`, `Func<>`, any
+stored lambda — breaks s&box's hot-reloader. The hotloader can't migrate static
+delegate state across an assembly swap, so **every hotload after you add that file
+fails**. Symptoms, in the order they bite:
+
+1. New component types silently never register: `gameobject_add_component` →
+   `no_typedesc` / "TypeLibrary has no entry", `execute_csharp` can't see your
+   namespace, `wait_for_hotloaded` expires — because the hotload that would have
+   registered them never completed.
+2. **Play mode still works at first** (entering Play does a fresh compile into a new
+   ALC — no migration), which masks the problem and makes it look like "the bridge
+   can't see my new type" rather than "my code broke hotload."
+3. Eventually the editor *wedges*: edit-context bridge ops (`editor_state`, …) throw
+   `NotImplementedException: Unable to upgrade delegate methods without declaring
+   types` on every call, the edit session won't reload your scene, and **Play also
+   breaks** (it clones the wedged session). A recompile can't fix it — the migration
+   can never get past the old static delegates. **Only an editor restart escapes it.**
+
+Real case (2026-06): a horde upgrade table stored `Action<SimUnit>` modifiers in
+`static readonly List<...>`. Every hotload silently failed; the new `GameDirector`
+component never appeared in the TypeLibrary; then `editor_state` started throwing the
+delegate error and the editor had to be restarted.
+
+**Fix — never put delegates in static roots.** Represent behaviour as *data + a
+switch*: store an `Id`/enum and dispatch with `ApplyX(id, target)` instead of a
+stored `Action`. If you must build delegate-bearing objects, build them **locally
+per call** (they get GC'd, so the hotloader never walks them as static state). Note
+`MemberwiseClone` is whitelist-blocked, so clone such data with an explicit
+field-copy ctor. Once wedged, restart the editor — and `wait_for_hotloaded`
+*expiring* (vs firing) after a code edit is your early warning that a hotload isn't
+completing.
+
 ## Bridge tool reliability
 
 - `editor_state` was observed to hard-fail once with `NotImplementedException:
   Unable to upgrade delegate methods without declaring types` and stay broken
   across a restart (**claude-sbox v0.0.109 only** — verified working in current
-  builds). If it ever recurs, route around it: `get_active_scene` (scene name +
+  builds). **More commonly this same error means *your own* code put a delegate in a
+  static field and wedged the hotloader — see "Static delegates wedge the hotloader"
+  above; the cure is an editor restart + removing the static delegate, not a bridge
+  fix.** If it's the bridge, route around it: `get_active_scene` (scene name +
   source path), `compile_check_build_state` (build state), `ping` (liveness), and
   `game_action_list` (errors `not_in_play_mode` when stopped, succeeds when
   playing) together reconstruct everything `editor_state` would have told you.
