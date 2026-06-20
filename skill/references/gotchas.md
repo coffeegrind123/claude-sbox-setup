@@ -323,6 +323,30 @@ field-copy ctor. Once wedged, restart the editor — and `wait_for_hotloaded`
 *expiring* (vs firing) after a code edit is your early warning that a hotload isn't
 completing.
 
+### `dynamic` is a hidden static delegate — never use it in editor code
+
+The same `Unable to upgrade delegate methods without declaring types` wedge has a
+sneakier trigger than a visible `Action<>`/`Func<>` field: a single **C# `dynamic`**
+expression. `dynamic` compiles to a DLR **CallSite** cached in a *compiler-generated
+static field*; once invoked, its Target is a `DynamicMethod` delegate whose
+`Method.DeclaringType == null`. On the next hotload the engine's `DelegateUpgrader`
+hits the `NoDeclaringType` case, can't re-point it, and swaps in an **error-delegate
+that throws only when invoked** (the swap itself doesn't abort — confirmed in
+`engine/Sandbox.Hotload/Upgraders/DelegateUpgrader.cs`). So one tool that runs the
+`dynamic` line starts throwing while every other tool keeps working — which is the
+tell that it's a `dynamic`/CallSite, not a broad static-delegate wipe. A recompile
+re-poisons it; only recreating the holder (editor restart) clears it.
+
+Real case (2026-06-20): the addon's `editor_state` handler had exactly one `dynamic`
+(`(((dynamic)networkInfo).is_multiplayer == true)`); it was the sole `dynamic` in the
+whole addon and was the entire cause of the recurring `editor_state` wedge. Fix was to
+drop it for a hoisted `bool` local.
+
+**Rule: no `dynamic`, and no cached `DynamicMethod`/`Expression.Compile` in statics,
+anywhere in editor addon code.** Use real types / reflection helpers / a hoisted
+local. (The dispatcher now also keeps the stack trace and tags this signature as
+`hotload_wedged` so the poisoned call site is identifiable instead of opaque.)
+
 ## Bridge tool reliability
 
 - `editor_state` was observed to hard-fail once with `NotImplementedException:
