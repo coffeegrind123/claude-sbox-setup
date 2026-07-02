@@ -1,5 +1,5 @@
 diff --git a/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs b/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs
-index a593650e..c419019a 100644
+index a593650e..b8097ff2 100644
 --- a/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs
 +++ b/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs
 @@ -165,6 +165,23 @@ internal static partial class PackageManager
@@ -26,7 +26,7 @@ index a593650e..c419019a 100644
  		}
  
  		private static async Task<MemoryFileSystem> DownloadBinDllsAsync( Package.IRevision revision, CancellationToken token )
-@@ -208,6 +225,67 @@ internal static partial class PackageManager
+@@ -208,6 +225,71 @@ internal static partial class PackageManager
  			return files?.Any( f => f.Path.StartsWith( ".bin/", StringComparison.OrdinalIgnoreCase ) && f.Path.EndsWith( ".dll", StringComparison.OrdinalIgnoreCase ) ) ?? false;
  		}
  
@@ -52,7 +52,11 @@ index a593650e..c419019a 100644
 +				return false;
 +
 +			using var group = new CompileGroup( Package.Ident );
-+			group.AccessControl = PackageManager.AccessControl;
++			// claude-sbox is a trusted TOOL package whose editor code legitimately uses DllImport,
++			// reflection, etc. Compile it WITHOUT the whitelist (null AccessControl disables compile-time
++			// access control — see CompileGroup.AccessControl), mirroring how the tool-assembly load path
++			// already skips access control (PackageLoader: ToolsMode && isToolAssembly => no whitelist).
++			group.AccessControl = null;
 +			group.ReferenceProvider = this;
 +
 +			foreach ( var file in codeArchives )
