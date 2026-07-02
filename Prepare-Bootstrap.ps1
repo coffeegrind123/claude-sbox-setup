@@ -34,7 +34,8 @@
 
 .NOTES
     Does NOT use Sysinternals handle.exe; only checks well-known holder
-    process names (sbox-dev, VBCSCompiler, MSBuild, csc, dotnet build-server).
+    process names (sbox-dev, sbox-profiler and the other sbox launchers,
+    VBCSCompiler, MSBuild, csc, dotnet build-server).
     If a lock persists after running this, run handle64.exe -nobanner against
     the specific DLL path to find the unusual holder.
 #>
@@ -49,6 +50,11 @@ $ErrorActionPreference = 'Continue'
 
 $candidateNames = @(
     'sbox-dev',         # the editor itself
+    'sbox-profiler',    # the profiler launcher — holds game\bin\managed\*.dll open
+    'sbox',             # generic sbox launcher
+    'sbox-standalone',  # standalone game export launcher
+    'sbox-launcher',    # launcher
+    'sbox-server',      # dedicated server
     'VBCSCompiler',     # Roslyn persistent compile server
     'MSBuild',          # MSBuild worker
     'csc'               # standalone C# compiler
