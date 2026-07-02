@@ -1,16 +1,8 @@
 diff --git a/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs b/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs
-index a593650e..e5ebf0ac 100644
+index a593650e..c419019a 100644
 --- a/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs
 +++ b/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs
-@@ -1,6 +1,7 @@
- ﻿using System.IO;
- using System.Net;
- using System.Threading;
-+using Sandbox.Compiling; // claude-sbox: CompileGroup + CodeArchive for the .cll compile fallback
- 
- namespace Sandbox;
- 
-@@ -165,6 +166,23 @@ internal static partial class PackageManager
+@@ -165,6 +165,23 @@ internal static partial class PackageManager
  				AssemblyFileSystem ??= new AggregateFileSystem();
  				AssemblyFileSystem.Mount( dllFs );
  			}
@@ -34,7 +26,7 @@ index a593650e..e5ebf0ac 100644
  		}
  
  		private static async Task<MemoryFileSystem> DownloadBinDllsAsync( Package.IRevision revision, CancellationToken token )
-@@ -208,6 +226,67 @@ internal static partial class PackageManager
+@@ -208,6 +225,67 @@ internal static partial class PackageManager
  			return files?.Any( f => f.Path.StartsWith( ".bin/", StringComparison.OrdinalIgnoreCase ) && f.Path.EndsWith( ".dll", StringComparison.OrdinalIgnoreCase ) ) ?? false;
  		}
  
