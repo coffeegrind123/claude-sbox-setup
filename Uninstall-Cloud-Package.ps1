@@ -6,13 +6,13 @@
     runtime cache. Two uses: switching to the local source addon at
     game/addons/claude-sbox/, OR clearing every cached copy to force a clean
     re-download of the published package on the next editor start (pass -Force
-    when no local source is present — the re-download is then intended).
+    when no local source is present - the re-download is then intended).
 
 .DESCRIPTION
     The engine patches auto-install the published ghage.claude-sbox package
-    on first editor start (patch 0004 — StartupLoadProject). Patch 0012
+    on first editor start (patch 0004 - StartupLoadProject). Patch 0012
     skips that install when game/addons/claude-sbox/.sbproj is present at
-    startup — but if the cloud package was installed BEFORE the local
+    startup - but if the cloud package was installed BEFORE the local
     source was cloned, the cloud .cll wins the load race and your local
     edits are invisible.
 
@@ -20,17 +20,17 @@
     the local source instead. It deletes:
 
         game/download/assets/_bin/package_ghage_claude_sbox.*
-            The .cll (compiled assembly) + .xml (metadata) — ~640 KB.
+            The .cll (compiled assembly) + .xml (metadata) - ~640 KB.
 
     With -CleanCache it also deletes:
 
         game/.claude-sbox/cache/
             Runtime cache for sbox-docs, sbox-learn-docs, schema fingerprint,
-            etc. (~900 MB). Safe to wipe — repopulates from GitHub tarballs
+            etc. (~900 MB). Safe to wipe - repopulates from GitHub tarballs
             on first use. Most useful when an addon update changes cache
             schemas; otherwise keep it to save the re-fetch.
 
-    Sbox MUST be closed before running — the .cll is memory-mapped while
+    Sbox MUST be closed before running - the .cll is memory-mapped while
     the editor is up and the delete will fail with a sharing violation.
 
 .PARAMETER DryRun
@@ -76,18 +76,18 @@ Write-Host "  sbox root : $SboxRoot"
 if ($DryRun) { Write-Host "  mode      : DRY-RUN (no files will be touched)" -ForegroundColor Yellow }
 Write-Host ""
 
-# Refuse to run while sbox is up — the .cll is locked.
+# Refuse to run while sbox is up - the .cll is locked.
 $sboxProc = Get-Process -Name 'sbox-dev','sbox' -ErrorAction SilentlyContinue
 if ($sboxProc) {
     Write-Host "ABORT: sbox is currently running (pid $($sboxProc[0].Id)). Close it first." -ForegroundColor Red
     exit 2
 }
 
-# Warn if the local source addon isn't present — without it, the next
+# Warn if the local source addon isn't present - without it, the next
 # startup will re-download the cloud package via StartupLoadProject.
 if (-not (Test-Path $LocalSbproj)) {
     if ($Force) {
-        Write-Host "WARNING: $LocalSbproj not found — next editor start WILL re-download the cloud package." -ForegroundColor Yellow
+        Write-Host "WARNING: $LocalSbproj not found - next editor start WILL re-download the cloud package." -ForegroundColor Yellow
         Write-Host "         Continuing because -Force was given." -ForegroundColor Yellow
     } else {
         Write-Host "ABORT: $LocalSbproj not found." -ForegroundColor Red
@@ -108,7 +108,7 @@ if (Test-Path $BinDir) {
 }
 
 if ($pkgFiles.Count -eq 0) {
-    Write-Host "No cloud package files found in $BinDir — already uninstalled."
+    Write-Host "No cloud package files found in $BinDir - already uninstalled."
 } else {
     $pkgBytes = ($pkgFiles | Measure-Object -Property Length -Sum).Sum
     Write-Host "Cloud package files to remove ($($pkgFiles.Count) files, $([Math]::Round($pkgBytes/1KB)) KB):"
@@ -130,7 +130,7 @@ if (Test-Path $Source2Cache) {
     Write-Host "Source2 asset cache to remove: $Source2Cache"
     if (-not $DryRun) { Remove-Item -Path $Source2Cache -Force; Write-Host "Deleted source2 asset cache." -ForegroundColor Green }
 } else {
-    Write-Host "No source2 asset cache found — nothing to remove."
+    Write-Host "No source2 asset cache found - nothing to remove."
 }
 Write-Host ""
 
@@ -145,7 +145,7 @@ if ($snapFiles.Count -gt 0) {
     foreach ($f in $snapFiles) { Write-Host "  - $($f.FullName)" }
     if (-not $DryRun) { foreach ($f in $snapFiles) { Remove-Item -Path $f.FullName -Force }; Write-Host "Deleted snapshot file(s)." -ForegroundColor Green }
 } else {
-    Write-Host "No claude-sbox cloud snapshot in $GlobalBin — nothing to remove."
+    Write-Host "No claude-sbox cloud snapshot in $GlobalBin - nothing to remove."
 }
 Write-Host ""
 
@@ -160,7 +160,7 @@ if ($CleanCache) {
             Write-Host "Deleted runtime cache." -ForegroundColor Green
         }
     } else {
-        Write-Host "No runtime cache found at $CacheDir — nothing to clean."
+        Write-Host "No runtime cache found at $CacheDir - nothing to clean."
     }
 } else {
     if (Test-Path $CacheDir) {
@@ -172,8 +172,8 @@ if ($CleanCache) {
 Write-Host ""
 
 if ($DryRun) {
-    Write-Host "Dry run complete — no files were touched." -ForegroundColor Yellow
+    Write-Host "Dry run complete - no files were touched." -ForegroundColor Yellow
 } else {
     Write-Host "Done. Start sbox; you should see this in the log:"
-    Write-Host "  [claude-sbox] local addon at game/addons/claude-sbox/ detected — skipping cloud install, local source will be used"
+    Write-Host "  [claude-sbox] local addon at game/addons/claude-sbox/ detected - skipping cloud install, local source will be used"
 }

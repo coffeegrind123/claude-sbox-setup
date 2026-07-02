@@ -50,7 +50,7 @@ $ErrorActionPreference = 'Continue'
 
 $candidateNames = @(
     'sbox-dev',         # the editor itself
-    'sbox-profiler',    # the profiler launcher — holds game\bin\managed\*.dll open
+    'sbox-profiler',    # the profiler launcher - holds game\bin\managed\*.dll open
     'sbox',             # generic sbox launcher
     'sbox-standalone',  # standalone game export launcher
     'sbox-launcher',    # launcher
