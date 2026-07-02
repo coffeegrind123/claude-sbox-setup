@@ -1,9 +1,12 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-    Remove the cloud-installed ghage.claude-sbox package binaries plus
-    (optionally) the runtime cache. Use when switching from the cloud
-    package to the local source addon at game/addons/claude-sbox/.
+    Remove the cloud-installed ghage.claude-sbox package binaries, its
+    source2 asset cache, any patch-0004 cloud snapshot, and (optionally) the
+    runtime cache. Two uses: switching to the local source addon at
+    game/addons/claude-sbox/, OR clearing every cached copy to force a clean
+    re-download of the published package on the next editor start (pass -Force
+    when no local source is present — the re-download is then intended).
 
 .DESCRIPTION
     The engine patches auto-install the published ghage.claude-sbox package
@@ -64,6 +67,8 @@ $SboxRoot   = (Resolve-Path (Join-Path $SetupDir '..\..\..')).Path
 $BinDir     = Join-Path $SboxRoot 'game\download\assets\_bin'
 $CacheDir   = Join-Path $SboxRoot 'game\.claude-sbox\cache'
 $LocalSbproj = Join-Path $SboxRoot 'game\addons\claude-sbox\.sbproj'
+$Source2Cache = Join-Path $SboxRoot 'game\.source2\assets.ghage.claude-sbox.cache'
+$GlobalBin  = Join-Path $SboxRoot 'game\.sbox-global\cloud\.bin'
 
 Write-Host "Uninstall-Cloud-Package"
 Write-Host "  setup dir : $SetupDir"
@@ -116,6 +121,31 @@ if ($pkgFiles.Count -eq 0) {
         }
         Write-Host "Deleted $($pkgFiles.Count) package file(s)." -ForegroundColor Green
     }
+}
+Write-Host ""
+
+# 1b. Source2 compiled-asset cache for the package (stale after uninstall; a fresh
+#     install/re-download rebuilds it). Not covered by older versions of this script.
+if (Test-Path $Source2Cache) {
+    Write-Host "Source2 asset cache to remove: $Source2Cache"
+    if (-not $DryRun) { Remove-Item -Path $Source2Cache -Force; Write-Host "Deleted source2 asset cache." -ForegroundColor Green }
+} else {
+    Write-Host "No source2 asset cache found — nothing to remove."
+}
+Write-Host ""
+
+# 1c. Cloud auto-mount snapshot (patch 0004), if a claude-sbox copy was snapshotted there.
+$snapFiles = @()
+if (Test-Path $GlobalBin) {
+    $snapFiles = Get-ChildItem -Path $GlobalBin -File -ErrorAction SilentlyContinue |
+                 Where-Object { $_.Name -like 'package_ghage_claude_sbox.*' -or $_.Name -like '*claude*sbox*' }
+}
+if ($snapFiles.Count -gt 0) {
+    Write-Host "Cloud auto-mount snapshot files to remove ($($snapFiles.Count)):"
+    foreach ($f in $snapFiles) { Write-Host "  - $($f.FullName)" }
+    if (-not $DryRun) { foreach ($f in $snapFiles) { Remove-Item -Path $f.FullName -Force }; Write-Host "Deleted snapshot file(s)." -ForegroundColor Green }
+} else {
+    Write-Host "No claude-sbox cloud snapshot in $GlobalBin — nothing to remove."
 }
 Write-Host ""
 

@@ -2,9 +2,12 @@
 # ============================================================================
 # Uninstall-Cloud-Package.sh — Linux equivalent of Uninstall-Cloud-Package.ps1
 #
-# Remove the cloud-installed ghage.claude-sbox package binaries plus
-# (optionally) the runtime cache. Use when switching from the cloud
-# package to the local source addon at game/addons/claude-sbox/.
+# Remove the cloud-installed ghage.claude-sbox package binaries, its source2
+# asset cache, any patch-0004 cloud snapshot, and (optionally) the runtime
+# cache. Two uses: switching to the local source addon at
+# game/addons/claude-sbox/, OR clearing all cached copies to force a clean
+# re-download of the published package on the next editor start (use --force
+# when no local source is present — the re-download is then intended).
 #
 # The engine patches auto-install the published ghage.claude-sbox package on
 # first editor start (patch 0004). Patch 0012 skips that install when
@@ -53,6 +56,8 @@ SBOX_ROOT="$(cd "$SETUP_DIR/../../.." && pwd)"
 BIN_DIR="$SBOX_ROOT/game/download/assets/_bin"
 CACHE_DIR="$SBOX_ROOT/game/.claude-sbox/cache"
 LOCAL_SBPROJ="$SBOX_ROOT/game/addons/claude-sbox/.sbproj"
+SOURCE2_CACHE="$SBOX_ROOT/game/.source2/assets.ghage.claude-sbox.cache"
+GLOBAL_BIN="$SBOX_ROOT/game/.sbox-global/cloud/.bin"
 
 echo "Uninstall-Cloud-Package"
 echo "  setup dir : $SETUP_DIR"
@@ -101,6 +106,29 @@ else
         rm -f "${pkg_files[@]}"
         echo "Deleted ${#pkg_files[@]} package file(s)."
     fi
+fi
+echo ""
+
+# 1b. Source2 compiled-asset cache for the package (stale after uninstall; a fresh
+#     install/re-download rebuilds it). Not covered by older versions of this script.
+if [[ -f "$SOURCE2_CACHE" ]]; then
+    echo "Source2 asset cache to remove: $SOURCE2_CACHE"
+    if [[ $DRY_RUN -eq 0 ]]; then rm -f "$SOURCE2_CACHE" && echo "Deleted source2 asset cache."; fi
+else
+    echo "No source2 asset cache found — nothing to remove."
+fi
+echo ""
+
+# 1c. Cloud auto-mount snapshot (patch 0004), if a claude-sbox copy was snapshotted there.
+shopt -s nullglob
+snap_files=( "$GLOBAL_BIN"/package_ghage_claude_sbox.* "$GLOBAL_BIN"/*claude*sbox* )
+shopt -u nullglob
+if [[ ${#snap_files[@]} -gt 0 ]]; then
+    echo "Cloud auto-mount snapshot files to remove (${#snap_files[@]}):"
+    for f in "${snap_files[@]}"; do printf "  - %s\n" "$f"; done
+    if [[ $DRY_RUN -eq 0 ]]; then rm -f "${snap_files[@]}" && echo "Deleted snapshot file(s)."; fi
+else
+    echo "No claude-sbox cloud snapshot in $GLOBAL_BIN — nothing to remove."
 fi
 echo ""
 
