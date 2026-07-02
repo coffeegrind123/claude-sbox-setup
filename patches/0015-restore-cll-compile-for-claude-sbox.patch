@@ -1,0 +1,104 @@
+diff --git a/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs b/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs
+index a593650e..e5ebf0ac 100644
+--- a/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs
++++ b/engine/Sandbox.Engine/Services/Packages/PackageManager/PackageManager.ActivePackage.cs
+@@ -1,6 +1,7 @@
+ ﻿using System.IO;
+ using System.Net;
+ using System.Threading;
++using Sandbox.Compiling; // claude-sbox: CompileGroup + CodeArchive for the .cll compile fallback
+ 
+ namespace Sandbox;
+ 
+@@ -165,6 +166,23 @@ internal static partial class PackageManager
+ 				AssemblyFileSystem ??= new AggregateFileSystem();
+ 				AssemblyFileSystem.Mount( dllFs );
+ 			}
++
++			//
++			// claude-sbox -- restore the pre-#5038 client-side compile of a package's code archive
++			// (.cll = source, not a dll) into loadable assemblies, scoped to ghage.claude-sbox. The
++			// sbox.game backend doesn't emit precompiled .bin/*.dll for tool packages, so a published
++			// claude-sbox ships a .cll with no dlls and nothing loads on this engine. If it has no
++			// precompiled dlls but does carry a code archive, compile it now (as the engine did before
++			// #5038) and mount the result. Self-disables the moment the backend starts precompiling
++			// tools (HasPrecompiledDlls() becomes true, so this branch is skipped).
++			//
++			if ( !HasPrecompiledDlls()
++				&& Package.FullIdent.Contains( "ghage.claude-sbox", System.StringComparison.OrdinalIgnoreCase )
++				&& HasCodeArchives() )
++			{
++				if ( await CompileCodeArchive() && FileSystem.DirectoryExists( ".bin" ) )
++					AssemblyFileSystem.Mount( FileSystem.CreateSubSystem( ".bin" ) );
++			}
+ 		}
+ 
+ 		private static async Task<MemoryFileSystem> DownloadBinDllsAsync( Package.IRevision revision, CancellationToken token )
+@@ -208,6 +226,67 @@ internal static partial class PackageManager
+ 			return files?.Any( f => f.Path.StartsWith( ".bin/", StringComparison.OrdinalIgnoreCase ) && f.Path.EndsWith( ".dll", StringComparison.OrdinalIgnoreCase ) ) ?? false;
+ 		}
+ 
++		// claude-sbox -- restored .cll (code-archive) compile fallback (removed upstream in #5038).
++		// Mounted on FileSystem at /.bin, this is where the freshly-compiled assemblies live.
++		MemoryFileSystem memoryFileSystem;
++
++		/// <summary>claude-sbox: does this package carry a code archive (.cll source) we could compile?</summary>
++		internal bool HasCodeArchives()
++		{
++			return FileSystem.FindFile( "/", "*.cll", true ).Any();
++		}
++
++		/// <summary>
++		/// claude-sbox: compile this package's code archive(s) (.cll = Roslyn source) into dll(s) and
++		/// mount them at /.bin, restoring the pre-#5038 client-side package compile. Returns false if
++		/// there's nothing to compile or the build fails.
++		/// </summary>
++		internal async Task<bool> CompileCodeArchive()
++		{
++			var codeArchives = FileSystem.FindFile( "/", "*.cll", true ).ToArray();
++			if ( codeArchives.Length == 0 )
++				return false;
++
++			using var group = new CompileGroup( Package.Ident );
++			group.AccessControl = PackageManager.AccessControl;
++			group.ReferenceProvider = this;
++
++			foreach ( var file in codeArchives )
++			{
++				var bytes = await FileSystem.ReadAllBytesAsync( file );
++				if ( bytes is null || bytes.Length <= 1 )
++					throw new System.Exception( $"[claude-sbox] couldn't read code archive '{file}'" );
++
++				var archive = new CodeArchive( bytes );
++				var compiler = group.GetOrCreateCompiler( archive.CompilerName );
++				compiler.UpdateFromArchive( archive );
++				LoadingScreen.Subtitle = System.IO.Path.GetFileName( file );
++				await Task.Yield();
++			}
++
++			LoadingScreen.Subtitle = null;
++			await group.BuildAsync();
++
++			if ( !group.BuildResult.Success )
++			{
++				Log.Warning( $"[claude-sbox] failed to compile code archive for {Package.FullIdent}:\n" +
++					group.BuildResult.BuildDiagnosticsString( Microsoft.CodeAnalysis.DiagnosticSeverity.Error ) );
++				return false;
++			}
++
++			memoryFileSystem = new MemoryFileSystem();
++			memoryFileSystem.CreateDirectory( "/.bin" );
++			foreach ( var assembly in group.BuildResult.Output )
++			{
++				memoryFileSystem.WriteAllBytes( $"/.bin/{assembly.Compiler.AssemblyName}.dll", assembly.AssemblyData );
++				LoadingScreen.Subtitle = assembly.Compiler.AssemblyName;
++				await Task.Yield();
++			}
++			FileSystem.Mount( memoryFileSystem );
++			LoadingScreen.Subtitle = null;
++			return true;
++		}
++
+ 		private void Mount( bool reloadResources = true )
+ 		{
+ 			MountedFileSystem.Mount( FileSystem );
