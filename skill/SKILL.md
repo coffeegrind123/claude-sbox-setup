@@ -41,6 +41,7 @@ If `sbox_status` reports `connected=false`, the editor isn't running or the brid
 | The Ten Rules of s&box (lifecycle, networking, async) | `references/ten-rules.md` |
 | Common gotchas (namespace surprises, signature traps, set_property coercion — bool/Vector3/float/asset-handles now work, runtime-only props no-op in edit mode, bone GET=world vs SET=model space, Components.Get skips disabled, live runtime debugging, screenshot location, codesearch/news REST + privacy (queries leave the machine) and the forum-only Chromium driver lifecycle, auto_* naming, widget_drag rejections, game-code reflection whitelist vs full-trust editor addons, [Event] handler arg-count signature rule) | `references/gotchas.md` |
 | Bodygroups: hiding/showing body parts on models (e.g. citizen) | `references/bodygroups.md` |
+| Making **store/marketing art** for a package — the sbox.game thumbnails (Square 512², Wide 910×512, Tall 512×910) or a Discord **WAYWO** showcase (1200×800, 3:2) | `references/publish-art.md` — hand-write one HTML per canvas (uses `/claude-design`), screenshot via the browser MCP, crop with PIL. Same pipeline for achievement-icon sets. |
 | Find &/or "watch" a tutorial **video** (a YouTube link, or "find a video on X") | `references/watch-video.md`. `youtube_search(query)` to discover (keyless), then `youtube_watch(input)` (MCP): transcribe + frame-per-caption → a viewing package in the game folder. First time → `youtube_install`. Then Read `watch.md` + `frames/` from the game folder (use the returned `output_dir_game_relative`). |
 | Inspecting/editing an **animation graph** (`.vanmgrph`): find what drives an animation, disable a state-machine transition, change a node's sequence, add/connect nodes | Don't read a file: `animgraph_source_inspect(path)` to map nodes/connections/parameters/state-machines, then the `animgraph_edit_*` session tools (`_load` → mutate → `_verify` → `_save`) + `animgraph_set_node_property` / `animgraph_set_transition_disabled` / `animgraph_connect` / `animgraph_add_node`. Operates on the KV3 source — **not** `nodegraph_*` (that's ActionGraph/ShaderGraph only). See `references/tool-families.md` § Animation. |
 | Live MCP tools you can call (curated, with usage stories) | `references/mcp-tools.md` |
@@ -84,7 +85,34 @@ When the user asks you to change a value in the inspector ("set the player speed
 2. `get_components(id)` to enumerate.
 3. `set_property(id, component_index, name, value)`: runs through the editor's undo scope, so the user sees a normal undoable change. Handles every common type — `bool` (`true`/`false`), numbers, `Vector3`/`Color` (`{x,y,z}`/`{r,g,b,a}`), enum-by-name, and **asset handles** (pass a content-path string for a `Model`/`Material`, e.g. `"models/dev/box.vmdl"`). **Always verify**: the response includes `previous` and `current`. If they're equal, either the write missed or the property is **runtime-only** (e.g. `Rigidbody.Velocity` no-ops in edit mode) — confirm with `get_property` and, for runtime props, test in Play.
 
-When the user asks you to *write* code, prefer `Read`/`Edit`/`Write` against the bind-mounted source tree (your cwd is the s&box project root), then call `recompile` (when implemented) or tell the user to trigger a hot-reload.
+When the user asks you to *write* code, prefer `Read`/`Edit`/`Write` against the bind-mounted source tree (your cwd is the s&box project root). C# changes load on a **Play restart** (the play tab does a fresh compile); use `compile_project` + `compile_get_diagnostics severity:error` to verify before restarting.
+
+**Editing assets the editor must recompile (`.shader`, `.vmat`, `.vmdl`, …):** the editor's file-watch frequently does **not** see edits written from outside the editor (e.g. an agent writing into a WSL/9p-mounted tree), so it keeps the stale compiled `*_c` and your change silently never takes. Deleting the `*_c` to force a rebuild makes it WORSE — the engine's **on-demand** recompile path (`Asset.Compile`) errors (`Invalid Dependency Information`) and you get the pink/checkerboard error material. The fix differs by asset type:
+> - **`.shader`:** `Asset.Compile` is broken for shaders on this setup, so the bridge routes shader recompiles straight through the engine compiler, `Sandbox.Engine.Shaders.ShaderCompile.Compile(absPath, relPath, {ForceRecompile=true}, token)`. Call **`shader_compile_and_check(path)`** (or **`asset_recompile(path)`** — same path for `.shader`): it reads the source **fresh from disk** (so it sees your external/WSL edit), **writes a fresh `.shader_c`**, and returns `success` + per-program (`VFX_PROGRAM_VS`/`_PS`) results **plus the engine's compile error lines** (e.g. `*** Error! "g_tGround" can only use Default1!` — the error text only reaches the engine log, not the compile Results, so the bridge captures it for you). A clean compile + valid `.shader_c` is what you want.
+> - **other assets (`.vmat`/`.vmdl`/…):** `asset_recompile(path [, full=true])` runs the normal `Asset.Compile` pipeline and writes a fresh `*_c`.
+>
+> Then **Play-restart** to pick it up in the running game (a newly written `.shader_c` does **not** hot-load mid-session — see the runtime-shader quirks below). Custom **runtime** `Material.Create("name","shaders/x.shader")` shaders are especially bitten by the file-watch staleness — always recompile the `.shader` after editing it.
+
+> **Fallback (the bridge tools aren't reloaded yet, e.g. you just edited the addon):** run the engine compiler inline with `execute_csharp` via reflection (the static `ShaderCompile.Compile` is `internal`, so a direct call won't bind — use `MethodInfo.Invoke`):
+> ```csharp
+> var sct = typeof(Sandbox.Engine.Shaders.ShaderCompile);
+> var mi  = sct.GetMethods((System.Reflection.BindingFlags)0x3E).First(m => m.Name=="Compile" && m.GetParameters().Length==4);
+> var opt = Activator.CreateInstance(sct.Assembly.GetType("Sandbox.Engine.Shaders.ShaderCompileOptions"));
+> opt.GetType().GetProperty("ForceRecompile").SetValue(opt, true);
+> var asset = AssetSystem.FindByPath("shaders/x.shader");
+> var t = (System.Threading.Tasks.Task)mi.Invoke(null, new object[]{ asset.AbsolutePath, asset.Path, opt, System.Threading.CancellationToken.None });
+> t.GetAwaiter().GetResult();   // writes shaders/x.shader_c
+> ```
+> Do **not** use `AssetSystem.FindByPath(...).Compile(true)` for a `.shader` — that's the broken on-demand path (`Invalid Dependency Information`, writes no `_c`). It still works for non-shader assets. Verify either way by checking the `*_c` file's mtime/size updated.
+
+### Runtime custom-shader quirks (`Material.Create("name","shaders/x.shader")`)
+
+Hard-won, all true together — design around them:
+
+- **Render-attribute binding is partial.** Setting per-object params via `renderer.SceneObject.Attributes.Set(name, value)` (read in the shader as `< Attribute("name"); >`) works for **textures** (`Texture2D`) and **`float2`**, but **silently fails for `float` and `float4`/colour** params — those keep their shader `Default`. (You can tell because heightmap + UV-mapping bind fine while a colour/scale won't.) **Fix:** don't push scalars/colours as attributes — bake them as shader **`Default`s** and make a separate `.shader` variant per look (e.g. `snow_deform` white-default vs `sand_deform` sand-default). Defaults always render.
+- **Recompiling an already-loaded shader doesn't hot-swap it.** `Asset.Compile(true)` rewrites the `*_c` on disk, but the editor keeps the previously-loaded shader program in memory; even a Play restart (and sometimes a full editor restart) won't pick up the change for a shader that was already loaded this session. A **brand-new `.shader` filename** has nothing cached, so it loads fresh on first use — prefer creating a new variant file over editing-in-place when you need the change to actually take.
+- **`Material::Init()` + manual `ShadingModelStandard::Shade(i, m)`** is the reliable opaque-lit path (set `m.Albedo/Normal/Roughness/Metalness/AmbientOcclusion/Opacity`, optionally `m.Emission`). Read world position in the pixel stage via a custom interpolant (`o.vWp = o.vPositionWs.xy` in VS) — `i.vPositionWs` is a VS-only field; `i.vTextureCoords.xy` is the valid PS UV. `g_flTime` is available for animation.
+- For an emissive look on an existing material, prefer using the material's **own authored emissive map** (most stock ground/lava `.vmat`s ship one) + a low-threshold camera **Bloom** post-process, rather than a custom shader — far less fragile than runtime shader plumbing.
 
 ## Believe the user about what's on screen
 

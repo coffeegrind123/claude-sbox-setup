@@ -991,6 +991,15 @@ A classic toon outline = a second renderer of the same model, every vertex pushe
   `save_to` is a path on the *editor host* (Windows here), not the agent's FS. Upshot: **you cannot
   screenshot the in-game HUD.** Don't try to verify UI work with a screenshot — see SKILL.md
   "Believe the user about what's on screen".
+- **Do NOT screenshot every iteration.** A scene screenshot is a slow, heavy, *deliberate* probe —
+  one good capture confirms an effect, then reason and fix in code. Re-shooting after every small
+  tweak (recompile → apply → shoot → repeat) is noise: it spams the user, burns turns, and skips the
+  actual diagnosis. The right loop is **read the logs FIRST** (`tail_log` at `info` — shader warnings,
+  `Done N combos`, errors all surface there) and only screenshot when you have a specific visual
+  question the logs can't answer. If the user is watching the editor live, prefer asking them what
+  they see (per "Believe the user about what's on screen") over snapping your own picture. When you do
+  need to iterate on a shader/material, isolate the variable in ONE test (e.g. flat colour vs textured)
+  rather than re-shooting the same broken setup.
 - `wait_for_scene_play` frequently returns `expired:true` even though Play
   *did* start (the event races the TogglePlay call). Don't trust the wait —
   verify by `list_gameobjects` (runtime objects like the spawned Player
@@ -1003,14 +1012,25 @@ A classic toon outline = a second renderer of the same model, every vertex pushe
 
 ## Writing custom shaders (.shader)
 
-- **No standalone shader compiler tool.** `shader_compile_and_check` reports
-  `no_compiler` in this build. To compile a `.shader` you wrote: call
-  `asset_compilation_control(path:"shaders/foo.shader", mode:"compile",
-  full:true)` then read errors from `tail_log` (compile output is logged as
-  `Compiling: ...` → per-line `error: ...` → `Shader compile failed` OR
-  `Done N combos in Xms`). The `.shader_c` lands next to the source. Note the
-  tool returns `success:true` even when the HLSL fails — trust the log, not the
-  return value. A `Stall detected.` warn after a multi-second compile is benign.
+- **Compile a `.shader` with `shader_compile_and_check(path)`** (fixed — it used to
+  report `no_compiler`). It force-compiles via the engine's `ShaderCompile.Compile`
+  (reads source fresh from disk, so it sees external/WSL edits the file-watch
+  misses), **writes the `.shader_c`** next to the source, and returns `success` +
+  per-program (`VFX_PROGRAM_VS`/`_PS`) `success`/`combo_count` + an **`errors`**
+  array with the engine's compile diagnostics (e.g.
+  `*** Error! "g_tGround" can only use Default1!`). `asset_recompile(path)` takes
+  the same path for `.shader`. (The error text is NOT on the compile Results object
+  — it only reaches the engine log under category `engine/Vfx`; the bridge snapshots
+  the log around the compile to surface it, so you don't need to grep `tail_log`.)
+  A newly written `.shader_c` still needs a **Play/editor restart** to hot-load into
+  the running game. A `Stall detected.` warn after a multi-second compile is benign.
+- **`Texture2D` attribute defaults accept `Default1(scalar)` ONLY.** Declaring a
+  texture input with `Default3( r, g, b )` (or `Default2`/`Default4`) fails the PS
+  compile with `*** Error! "g_tFoo" can only use Default1!` and **no `.shader_c` is
+  written**, so the material falls back to the **pulsing red error shader**. Use a
+  single scalar fallback: `Texture2D g_tFoo < Attribute("Foo"); SrgbRead(true);
+  Default1( 0.3 ); >;`. (`Default2/3/4` are for `float2/3/4` *scalar* attributes,
+  not textures.)
 - **Don't redeclare the common samplers.** `g_sAniso`, `g_sBilinearClamp`,
   `g_sBilinearWrap`, `g_sTrilinear*`, `g_sPoint*` are already defined in
   `core/shaders/common_samplers.fxc` (pulled in via `common/pixel.hlsl`).
@@ -1142,6 +1162,8 @@ Two ways around it:
 ## A mid-session-added `.shader` will NOT bind via runtime `Material.Create` — pink forever (even after restart)
 
 Distinct from the stale-handle pink above, and far nastier: a shader **added (or first compiled) during a running editor session** comes back as the **pink error material** from `Material.Create( name, "shaders/new.shader" )` **even when it compiles cleanly** (`new.shader_c` present, no ANTLR errors) — and **a full editor restart does NOT fix it**. Lost a long session to this; the fix is to not use a new shader at all.
+
+> **⚠️ Counter-example — this is NOT universal; a fresh project `.shader` CAN load at runtime.** The 7 Seconds project adds its own custom shaders (`snow_deform`, `sand_tex`, `stealth_camo`) used via runtime `Material.Create(...)` and they render correctly **after a Play/editor restart**, every session. So before concluding "pink forever," rule out the mundane causes first: (1) the `.shader` has **no valid `.shader_c`** because the compile actually failed — recompile with `shader_compile_and_check` and read its `errors` array (a `Texture2D` with `Default3` instead of `Default1`, a redeclared common sampler, etc. all fail the PS and write no `_c`); (2) you only wrote the `_c` **mid-session** and haven't restarted Play yet (a new `_c` never hot-loads into the running game). The genuine "registry won't take it" failure below is specific to **base-addon / `DevShader` shaders** and on-demand-combo cases (the goldsrc map port) — a self-contained project-local `.shader` with a clean `_c` is usually fine on restart.
 
 - **Only shaders that were built into the ORIGINAL project load reliably at runtime.** A map's own `goldsrc.shader`/`bsp_prop.shader` (present when the project was first built) resolve fine; a freshly-added `grass.shader` — same `Assets/shaders/` folder, valid `grass.shader_c` on disk — renders pink. The runtime shader registry is populated from the project build; a shader dropped in afterwards isn't in it.
 - **Out-of-process compiles don't register it.** `asset_compilation_control(..., mode:"compile")` emits the `.shader_c` but does **not** add the shader to the running editor's runtime registry.

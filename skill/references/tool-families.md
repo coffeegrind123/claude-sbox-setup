@@ -262,7 +262,7 @@ Read engine source / addon source / editor caches without a bind mount. **All re
 ## Material / shader / texture
 
 - `material_get_shader_parameters` / `material_set_shader_parameter` (in-memory; .vmat untouched).
-- `shader_compile_and_check` / `shader_get_compile_results` / `shadergraph_list_parameters`.
+- `shader_compile_and_check` (force-compiles a `.shader` via the engine compiler, sees external/WSL edits, **writes the `.shader_c`**, returns per-program success + an `errors` array; the reliable shader recompile on this setup — `asset_recompile` routes `.shader` through the same path) / `shader_get_compile_results` / `shadergraph_list_parameters`.
 - `texture_get_info` / `list_loaded_textures` / `screenshot_scene_to_file`.
 
 ## Lighting + environment
